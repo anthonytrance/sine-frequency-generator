@@ -31,6 +31,9 @@
   let pulseCursor = 0;
   let sweepTimer = null;
   let isFrequencyPointerActive = false;
+  let liveTimer = null;
+  let pendingLiveText = "";
+  let lastLiveAt = 0;
 
   document.addEventListener("DOMContentLoaded", init);
 
@@ -48,6 +51,7 @@
     els.playButton = document.getElementById("playButton");
     els.stopButton = document.getElementById("stopButton");
     els.status = document.getElementById("status");
+    els.liveStatus = document.getElementById("liveStatus");
     els.error = document.getElementById("error");
     els.frequencyInput = document.getElementById("frequencyInput");
     els.frequencySlider = document.getElementById("frequencySlider");
@@ -72,8 +76,8 @@
     document.addEventListener("keydown", handleGlobalKeys, true);
     setupMediaSession();
 
-    els.frequencyInput.addEventListener("input", () => setFrequency(els.frequencyInput.value));
-    els.frequencySlider.addEventListener("input", () => setFrequency(sliderPositionToFrequency(els.frequencySlider.value)));
+    els.frequencyInput.addEventListener("input", () => setFrequency(els.frequencyInput.value, { announce: "frequency" }));
+    els.frequencySlider.addEventListener("input", () => setFrequency(sliderPositionToFrequency(els.frequencySlider.value), { announce: "frequency", throttle: true }));
     els.frequencySlider.addEventListener("pointerdown", handleFrequencyPointerDown);
     els.frequencySlider.addEventListener("pointermove", handleFrequencyPointerMove);
     els.frequencySlider.addEventListener("pointerup", handleFrequencyPointerEnd);
@@ -88,14 +92,13 @@
       });
     });
 
-    els.volumeInput.addEventListener("input", () => setVolumeDb(els.volumeInput.value));
-    els.volumeSlider.addEventListener("input", () => setVolumeDb(els.volumeSlider.value));
+    els.volumeInput.addEventListener("input", () => setVolumeDb(els.volumeInput.value, { announce: "volume" }));
+    els.volumeSlider.addEventListener("input", () => setVolumeDb(els.volumeSlider.value, { announce: "volume", throttle: true }));
 
     els.volumeShiftButtons.forEach((button) => {
       button.addEventListener("click", () => {
         const shift = Number(button.dataset.volumeShift);
-        setVolumeDb(state.volumeDb + shift);
-        updateStatus(`${button.textContent.trim()}. ${statusText()}`);
+        setVolumeDb(state.volumeDb + shift, { announce: "volume" });
       });
     });
 
@@ -107,16 +110,17 @@
           startCurrentMode();
         }
         updateStatus();
+        announce(modeLabel());
       });
     });
 
-    els.pulseOnInput.addEventListener("change", () => updatePulseSettings());
-    els.pulseOffInput.addEventListener("change", () => updatePulseSettings());
+    els.pulseOnInput.addEventListener("change", () => updatePulseSettings("pulseOn"));
+    els.pulseOffInput.addEventListener("change", () => updatePulseSettings("pulseOff"));
 
-    els.sweepStartInput.addEventListener("change", () => updateSweepSettings());
-    els.sweepEndInput.addEventListener("change", () => updateSweepSettings());
-    els.sweepDurationInput.addEventListener("change", () => updateSweepSettings());
-    els.sweepLoopInput.addEventListener("change", () => updateSweepSettings());
+    els.sweepStartInput.addEventListener("change", () => updateSweepSettings("sweepStart"));
+    els.sweepEndInput.addEventListener("change", () => updateSweepSettings("sweepEnd"));
+    els.sweepDurationInput.addEventListener("change", () => updateSweepSettings("sweepDuration"));
+    els.sweepLoopInput.addEventListener("change", () => updateSweepSettings("sweepLoop"));
   }
 
   async function startPlayback() {
@@ -144,6 +148,7 @@
       updatePlaybackButtons();
       startCurrentMode();
       updateStatus();
+      announce("Playing");
     } catch (error) {
       showError(error.message || "Could not start audio.");
     }
@@ -164,6 +169,7 @@
       state.isPlaying = false;
       updatePlaybackButtons();
       updateStatus();
+      announce("Stopped");
       return;
     }
 
@@ -195,6 +201,7 @@
     }
 
     updateStatus();
+    announce("Stopped");
   }
 
   async function ensureAudioContext() {
@@ -314,7 +321,7 @@
       sweepTimer = window.setTimeout(() => runSweep(start, end), (duration + 0.06) * 1000);
     } else {
       sweepTimer = window.setTimeout(() => {
-        setFrequency(end, { applyToAudio: false });
+        setFrequency(end, { applyToAudio: false, announce: false });
         updateStatus();
       }, duration * 1000);
     }
@@ -349,6 +356,9 @@
     }
 
     updateStatus();
+    if (options.announce === "frequency") {
+      announce(formatNumber(state.frequency), { throttle: Boolean(options.throttle) });
+    }
   }
 
   function shiftFrequency(ratio, label) {
@@ -360,8 +370,8 @@
       next *= ratio;
     }
 
-    setFrequency(next);
-    updateStatus(`${label}. ${statusText()}`);
+    setFrequency(next, { announce: false });
+    announce(formatNumber(state.frequency));
   }
 
   function handleFrequencyPointerDown(event) {
@@ -399,10 +409,10 @@
     const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
     const position = Math.round(ratio * FREQUENCY_SLIDER_STEPS);
     els.frequencySlider.value = String(position);
-    setFrequency(sliderPositionToFrequency(position));
+    setFrequency(sliderPositionToFrequency(position), { announce: "frequency", throttle: true });
   }
 
-  function setVolumeDb(value) {
+  function setVolumeDb(value, options = {}) {
     const next = clampNumber(value, MIN_VOLUME_DB, MAX_VOLUME_DB, state.volumeDb);
     state.volumeDb = roundNumber(next, 1);
     syncVolumeControls();
@@ -414,9 +424,12 @@
     }
 
     updateStatus();
+    if (options.announce === "volume") {
+      announce(formatDb(state.volumeDb), { throttle: Boolean(options.throttle) });
+    }
   }
 
-  function updatePulseSettings() {
+  function updatePulseSettings(changedField) {
     state.pulseOnMs = Math.round(clampNumber(els.pulseOnInput.value, 10, 60000, state.pulseOnMs));
     state.pulseOffMs = Math.round(clampNumber(els.pulseOffInput.value, 10, 60000, state.pulseOffMs));
     els.pulseOnInput.value = String(state.pulseOnMs);
@@ -427,9 +440,14 @@
     }
 
     updateStatus();
+    if (changedField === "pulseOn") {
+      announce(`On ${state.pulseOnMs}`);
+    } else if (changedField === "pulseOff") {
+      announce(`Off ${state.pulseOffMs}`);
+    }
   }
 
-  function updateSweepSettings() {
+  function updateSweepSettings(changedField) {
     state.sweepStart = roundNumber(clampNumber(els.sweepStartInput.value, MIN_FREQUENCY, MAX_FREQUENCY, state.sweepStart), 4);
     state.sweepEnd = roundNumber(clampNumber(els.sweepEndInput.value, MIN_FREQUENCY, MAX_FREQUENCY, state.sweepEnd), 4);
     state.sweepDuration = roundNumber(clampNumber(els.sweepDurationInput.value, 0.05, 3600, state.sweepDuration), 2);
@@ -444,6 +462,15 @@
     }
 
     updateStatus();
+    if (changedField === "sweepStart") {
+      announce(`Start ${formatNumber(state.sweepStart)}`);
+    } else if (changedField === "sweepEnd") {
+      announce(`End ${formatNumber(state.sweepEnd)}`);
+    } else if (changedField === "sweepDuration") {
+      announce(`Length ${formatNumber(state.sweepDuration)}`);
+    } else if (changedField === "sweepLoop") {
+      announce(state.sweepLoop ? "Repeat on" : "Repeat off");
+    }
   }
 
   function syncFrequencyControls() {
@@ -478,6 +505,54 @@
 
   function updateStatus(text) {
     els.status.textContent = text || statusText();
+  }
+
+  function announce(text, options = {}) {
+    if (!text) {
+      return;
+    }
+
+    if (options.throttle) {
+      pendingLiveText = text;
+
+      const now = Date.now();
+      const elapsed = now - lastLiveAt;
+      const delay = Math.max(0, 180 - elapsed);
+
+      if (delay === 0) {
+        if (liveTimer !== null) {
+          window.clearTimeout(liveTimer);
+          liveTimer = null;
+        }
+        setLiveText(pendingLiveText);
+        pendingLiveText = "";
+        lastLiveAt = Date.now();
+      } else if (liveTimer === null) {
+        liveTimer = window.setTimeout(() => {
+          setLiveText(pendingLiveText);
+          pendingLiveText = "";
+          liveTimer = null;
+          lastLiveAt = Date.now();
+        }, delay);
+      }
+      return;
+    }
+
+    if (liveTimer !== null) {
+      window.clearTimeout(liveTimer);
+      liveTimer = null;
+      pendingLiveText = "";
+    }
+
+    setLiveText(text);
+    lastLiveAt = Date.now();
+  }
+
+  function setLiveText(text) {
+    els.liveStatus.textContent = "";
+    window.setTimeout(() => {
+      els.liveStatus.textContent = text;
+    }, 0);
   }
 
   function statusText() {
