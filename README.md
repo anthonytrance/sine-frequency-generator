@@ -20,6 +20,7 @@ https://anthonytrance.github.io/sine-frequency-generator/
 - Sweep up and sweep down modes with configurable start, end, length, and repeat.
 - Screen-reader-friendly labels, fieldsets, native controls, and live status.
 - Best-effort support for VoiceOver Magic Tap and media play/pause actions through browser media controls.
+- Collapsed keyboard shortcut reference in the app.
 
 ## Local use
 

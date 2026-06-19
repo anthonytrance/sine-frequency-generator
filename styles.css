@@ -159,6 +159,26 @@ summary:focus-visible {
   cursor: pointer;
 }
 
+.shortcut-list {
+  margin: 0.85rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.shortcut-list li {
+  margin: 0.45rem 0;
+}
+
+kbd {
+  display: inline-block;
+  min-width: 1.7em;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: #f7f7f5;
+  padding: 0.08rem 0.35rem;
+  font: 0.95em ui-monospace, "SFMono-Regular", Consolas, monospace;
+  text-align: center;
+}
+
 .radio-list {
   display: grid;
   gap: 0.55rem;
@@ -223,7 +243,8 @@ summary:focus-visible {
 
   .panel:first-child,
   #pulseSettings,
-  #sweepSettings {
+  #sweepSettings,
+  .utility-panel {
     grid-column: 1 / -1;
   }
 

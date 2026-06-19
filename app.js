@@ -152,13 +152,7 @@
 
     els.modeInputs.forEach((input) => {
       input.addEventListener("change", () => {
-        state.mode = input.value;
-        updateModePanels();
-        if (state.isPlaying) {
-          startCurrentMode();
-        }
-        updateStatus();
-        announce(modeLabel());
+        setMode(input.value);
       });
     });
 
@@ -1076,6 +1070,18 @@
     } else if (key === "s") {
       event.preventDefault();
       stopPlayback();
+    } else if (key === "1" || key === "c") {
+      event.preventDefault();
+      setMode("continuous");
+    } else if (key === "2" || key === "p") {
+      event.preventDefault();
+      setMode("pulse");
+    } else if (key === "3" || key === "u") {
+      event.preventDefault();
+      setMode("sweep-up");
+    } else if (key === "4" || key === "d") {
+      event.preventDefault();
+      setMode("sweep-down");
     } else if (key === "ArrowUp") {
       event.preventDefault();
       setVolumeDb(state.volumeDb + (event.shiftKey ? 6 : 1), { announce: "volume" });
@@ -1107,6 +1113,22 @@
     }
 
     return Boolean(target.closest("input, textarea, select, button, summary"));
+  }
+
+  function setMode(mode) {
+    const input = els.modeInputs.find((candidate) => candidate.value === mode);
+    if (!input) {
+      return;
+    }
+
+    input.checked = true;
+    state.mode = mode;
+    updateModePanels();
+    if (state.isPlaying) {
+      startCurrentMode();
+    }
+    updateStatus();
+    announce(modeLabel());
   }
 
   function dbToGain(db) {
