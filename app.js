@@ -9,6 +9,7 @@
   const MAX_VOLUME_DB = 0;
   const VOLUME_SLIDER_STEPS = 1000;
   const EDGE_FADE_SECONDS = 0.008;
+  const LIVE_ANNOUNCEMENTS_ENABLED = false;
 
   const state = {
     frequency: 440,
@@ -607,6 +608,10 @@
   }
 
   function announce(text, options = {}) {
+    if (!LIVE_ANNOUNCEMENTS_ENABLED) {
+      return;
+    }
+
     if (!text) {
       return;
     }
