@@ -89,6 +89,9 @@
     els.playButton.addEventListener("click", togglePlayback);
     els.stopButton.addEventListener("click", () => stopPlayback());
     document.addEventListener("keydown", handleGlobalKeys, true);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handlePageReturn);
+    window.addEventListener("pageshow", handlePageReturn);
     setupMediaSession();
 
     els.frequencyInput.addEventListener("input", () => setFrequency(els.frequencyInput.value, { announce: "frequency" }));
@@ -163,15 +166,15 @@
       return;
     }
 
-    if (state.isPlaying && oscillator && gateGain) {
+    if (isEngineHealthy()) {
       startCurrentMode();
       startMediaControlAudio();
       return;
     }
 
-    if (state.isPlaying && (!oscillator || !gateGain)) {
+    if (state.isPlaying) {
       stopPlayback({ immediate: true, silent: true });
-    } else if (!state.isPlaying && (oscillator || gateGain)) {
+    } else if (oscillator || gateGain) {
       disposeToneNodes({ immediate: true });
     }
 
@@ -180,7 +183,7 @@
 
     try {
       clearError();
-      await ensureAudioContext();
+      await ensureAudioContext({ forceNew: true });
 
       const now = audioContext.currentTime;
       oscillator = audioContext.createOscillator();
@@ -274,21 +277,91 @@
     }
   }
 
-  async function ensureAudioContext() {
+  async function ensureAudioContext(options = {}) {
     const ContextClass = window.AudioContext || window.webkitAudioContext;
     if (!ContextClass) {
       throw new Error("This browser does not support Web Audio.");
     }
 
-    if (!audioContext || audioContext.state === "closed") {
-      audioContext = new ContextClass();
-      outputGain = audioContext.createGain();
-      outputGain.gain.value = dbToGain(state.volumeDb);
-      outputGain.connect(audioContext.destination);
+    if (options.forceNew || !audioContext || audioContext.state === "closed") {
+      createAudioContext(ContextClass);
     }
 
-    if (audioContext.state === "suspended") {
-      await audioContext.resume();
+    await resumeAudioContext();
+
+    if (!isAudioContextRunning()) {
+      createAudioContext(ContextClass);
+      await resumeAudioContext();
+    }
+
+    if (!isAudioContextRunning()) {
+      throw new Error("Audio did not start. Press Play again.");
+    }
+  }
+
+  function createAudioContext(ContextClass) {
+    const oldContext = audioContext;
+
+    audioContext = new ContextClass();
+    audioContext.addEventListener?.("statechange", handleAudioContextStateChange);
+    outputGain = audioContext.createGain();
+    outputGain.gain.value = dbToGain(state.volumeDb);
+    outputGain.connect(audioContext.destination);
+
+    if (oldContext && oldContext !== audioContext && oldContext.state !== "closed") {
+      oldContext.close?.().catch?.(() => {});
+    }
+  }
+
+  async function resumeAudioContext() {
+    if (!audioContext || audioContext.state === "running") {
+      return;
+    }
+
+    try {
+      await audioContext.resume?.();
+    } catch {
+      // A fresh context is attempted by ensureAudioContext after this.
+    }
+  }
+
+  function isAudioContextRunning() {
+    return Boolean(audioContext && audioContext.state === "running");
+  }
+
+  function isEngineHealthy() {
+    return Boolean(state.isPlaying && oscillator && gateGain && isAudioContextRunning());
+  }
+
+  function handleAudioContextStateChange(event) {
+    if (event.target !== audioContext) {
+      return;
+    }
+
+    if (!state.isPlaying || document.visibilityState === "hidden") {
+      return;
+    }
+
+    window.setTimeout(() => {
+      if (state.isPlaying && !isEngineHealthy() && document.visibilityState !== "hidden") {
+        stopPlayback({ immediate: true, silent: true });
+      }
+    }, 300);
+  }
+
+  function handleVisibilityChange() {
+    if (document.visibilityState !== "hidden") {
+      handlePageReturn();
+    }
+  }
+
+  function handlePageReturn() {
+    if (document.visibilityState === "hidden") {
+      return;
+    }
+
+    if (state.isPlaying && !isEngineHealthy()) {
+      stopPlayback({ immediate: true, silent: true });
     }
   }
 
