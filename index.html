@@ -48,7 +48,7 @@
         Stopped, 440 Hz, -6 dB.
       </p>
       <audio id="mediaControlAudio" loop playsinline preload="auto" aria-hidden="true"></audio>
-      <p id="liveStatus" class="sr-only"></p>
+      <p id="liveStatus" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
       <p id="error" class="error" role="alert" hidden></p>
     </section>
 
@@ -99,11 +99,11 @@
       <div class="two-column">
         <div>
           <label for="pulseOnInput">On time in milliseconds</label>
-          <input id="pulseOnInput" type="number" inputmode="numeric" min="10" max="60000" step="1" value="200">
+          <input id="pulseOnInput" type="number" inputmode="numeric" min="10" max="60000" step="1" value="250">
         </div>
         <div>
           <label for="pulseOffInput">Off time in milliseconds</label>
-          <input id="pulseOffInput" type="number" inputmode="numeric" min="10" max="60000" step="1" value="200">
+          <input id="pulseOffInput" type="number" inputmode="numeric" min="10" max="60000" step="1" value="250">
         </div>
       </div>
     </section>

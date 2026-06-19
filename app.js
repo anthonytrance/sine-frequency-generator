@@ -9,14 +9,15 @@
   const MAX_VOLUME_DB = 0;
   const VOLUME_SLIDER_STEPS = 1000;
   const EDGE_FADE_SECONDS = 0.008;
-  const LIVE_ANNOUNCEMENTS_ENABLED = false;
+  const LIVE_ANNOUNCEMENTS_ENABLED = true;
+  const LIVE_THROTTLE_MS = 3500;
 
   const state = {
     frequency: 440,
     volumeDb: -6,
     mode: "continuous",
-    pulseOnMs: 200,
-    pulseOffMs: 200,
+    pulseOnMs: 250,
+    pulseOffMs: 250,
     sweepStart: 20,
     sweepEnd: 20000,
     sweepDuration: 10,
@@ -524,7 +525,7 @@
 
     updateStatus();
     if (options.announce === "volume") {
-      announce(formatDb(state.volumeDb), { throttle: Boolean(options.throttle) });
+      announce(formatNumber(state.volumeDb), { throttle: Boolean(options.throttle) });
     }
   }
 
@@ -621,7 +622,7 @@
 
       const now = Date.now();
       const elapsed = now - lastLiveAt;
-      const delay = Math.max(0, 180 - elapsed);
+      const delay = Math.max(0, LIVE_THROTTLE_MS - elapsed);
 
       if (delay === 0) {
         if (liveTimer !== null) {
