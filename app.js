@@ -38,6 +38,7 @@
   let pendingLiveText = "";
   let lastLiveAt = 0;
   let syncingMediaElement = false;
+  let startInProgress = false;
 
   document.addEventListener("DOMContentLoaded", init);
 
@@ -137,13 +138,24 @@
   }
 
   async function startPlayback() {
+    if (startInProgress) {
+      return;
+    }
+
+    if (state.isPlaying && oscillator && gateGain) {
+      startCurrentMode();
+      return;
+    }
+
+    if (state.isPlaying && (!oscillator || !gateGain)) {
+      stopPlayback({ immediate: true, silent: true });
+    }
+
+    startInProgress = true;
+
     try {
       clearError();
       await ensureAudioContext();
-      if (state.isPlaying) {
-        startCurrentMode();
-        return;
-      }
 
       const now = audioContext.currentTime;
       oscillator = audioContext.createOscillator();
@@ -156,15 +168,19 @@
       oscillator.connect(gateGain);
       gateGain.connect(outputGain);
       oscillator.start(now);
-      await startMediaControlAudio();
 
       state.isPlaying = true;
       updatePlaybackButtons();
       startCurrentMode();
+      startMediaControlAudio();
       updateStatus();
       announce("Playing");
     } catch (error) {
+      state.isPlaying = false;
+      updatePlaybackButtons();
       showError(error.message || "Could not start audio.");
+    } finally {
+      startInProgress = false;
     }
   }
 
@@ -183,7 +199,9 @@
       state.isPlaying = false;
       updatePlaybackButtons();
       updateStatus();
-      announce("Stopped");
+      if (!options.silent) {
+        announce("Stopped");
+      }
       pauseMediaControlAudio();
       return;
     }
@@ -216,7 +234,9 @@
     }
 
     updateStatus();
-    announce("Stopped");
+    if (!options.silent) {
+      announce("Stopped");
+    }
     pauseMediaControlAudio();
   }
 
@@ -226,7 +246,7 @@
       throw new Error("This browser does not support Web Audio.");
     }
 
-    if (!audioContext) {
+    if (!audioContext || audioContext.state === "closed") {
       audioContext = new ContextClass();
       outputGain = audioContext.createGain();
       outputGain.gain.value = dbToGain(state.volumeDb);
