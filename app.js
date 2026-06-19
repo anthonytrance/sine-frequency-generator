@@ -11,6 +11,8 @@
   const EDGE_FADE_SECONDS = 0.008;
   const LIVE_ANNOUNCEMENTS_ENABLED = true;
   const LIVE_THROTTLE_MS = 3500;
+  const MEDIA_HELPER_ARM_MS = 1000;
+  const MEDIA_HELPER_EVENT_MUTE_MS = 80;
 
   const state = {
     frequency: 440,
@@ -39,9 +41,13 @@
   let liveTimer = null;
   let pendingLiveText = "";
   let lastLiveAt = 0;
-  let syncingMediaElement = false;
+  let liveWriteToken = 0;
+  let liveInteractionActive = false;
+  let mediaHelperEventsMuted = false;
+  let mediaHelperPauseArmed = false;
+  let mediaHelperArmTimer = null;
+  let mediaHelperEventMuteTimer = null;
   let startInProgress = false;
-  let ignoreMediaPauseUntil = 0;
 
   document.addEventListener("DOMContentLoaded", init);
 
@@ -86,13 +92,19 @@
     setupMediaSession();
 
     els.frequencyInput.addEventListener("input", () => setFrequency(els.frequencyInput.value, { announce: "frequency" }));
-    els.frequencySlider.addEventListener("input", () => setFrequency(sliderPositionToFrequency(els.frequencySlider.value), { announce: "frequency", throttle: true }));
+    els.frequencySlider.addEventListener("input", () => {
+      if (!isFrequencyPointerActive) {
+        setFrequency(sliderPositionToFrequency(els.frequencySlider.value), { announce: "frequency", throttle: true });
+      }
+    });
     els.frequencySlider.addEventListener("pointerdown", handleFrequencyPointerDown);
     els.frequencySlider.addEventListener("pointermove", handleFrequencyPointerMove);
     els.frequencySlider.addEventListener("pointerup", handleFrequencyPointerEnd);
     els.frequencySlider.addEventListener("pointercancel", handleFrequencyPointerEnd);
     els.frequencySlider.addEventListener("touchstart", handleFrequencyTouch, { passive: false });
     els.frequencySlider.addEventListener("touchmove", handleFrequencyTouch, { passive: false });
+    els.frequencySlider.addEventListener("touchend", handleFrequencyTouchEnd);
+    els.frequencySlider.addEventListener("touchcancel", handleFrequencyTouchEnd);
 
     els.frequencyShiftButtons.forEach((button) => {
       button.addEventListener("click", () => {
@@ -102,13 +114,19 @@
     });
 
     els.volumeInput.addEventListener("input", () => setVolumeDb(els.volumeInput.value, { announce: "volume" }));
-    els.volumeSlider.addEventListener("input", () => setVolumeDb(volumeSliderPositionToDb(els.volumeSlider.value), { announce: "volume", throttle: true }));
+    els.volumeSlider.addEventListener("input", () => {
+      if (!isVolumePointerActive) {
+        setVolumeDb(volumeSliderPositionToDb(els.volumeSlider.value), { announce: "volume", throttle: true });
+      }
+    });
     els.volumeSlider.addEventListener("pointerdown", handleVolumePointerDown);
     els.volumeSlider.addEventListener("pointermove", handleVolumePointerMove);
     els.volumeSlider.addEventListener("pointerup", handleVolumePointerEnd);
     els.volumeSlider.addEventListener("pointercancel", handleVolumePointerEnd);
     els.volumeSlider.addEventListener("touchstart", handleVolumeTouch, { passive: false });
     els.volumeSlider.addEventListener("touchmove", handleVolumeTouch, { passive: false });
+    els.volumeSlider.addEventListener("touchend", handleVolumeTouchEnd);
+    els.volumeSlider.addEventListener("touchcancel", handleVolumeTouchEnd);
     els.mediaControlAudio.addEventListener("play", handleMediaElementPlay);
     els.mediaControlAudio.addEventListener("pause", handleMediaElementPause);
 
@@ -147,14 +165,18 @@
 
     if (state.isPlaying && oscillator && gateGain) {
       startCurrentMode();
+      startMediaControlAudio();
       return;
     }
 
     if (state.isPlaying && (!oscillator || !gateGain)) {
       stopPlayback({ immediate: true, silent: true });
+    } else if (!state.isPlaying && (oscillator || gateGain)) {
+      disposeToneNodes({ immediate: true });
     }
 
     startInProgress = true;
+    updatePlaybackButtons();
 
     try {
       clearError();
@@ -179,11 +201,13 @@
       updateStatus();
       announce("Playing");
     } catch (error) {
+      disposeToneNodes({ immediate: true });
       state.isPlaying = false;
       updatePlaybackButtons();
       showError(error.message || "Could not start audio.");
     } finally {
       startInProgress = false;
+      updatePlaybackButtons();
     }
   }
 
@@ -198,14 +222,20 @@
   function stopPlayback(options = {}) {
     clearModeTimers();
 
-    if (!oscillator || !gateGain || !audioContext) {
-      state.isPlaying = false;
-      updatePlaybackButtons();
-      updateStatus();
-      if (!options.silent) {
-        announce("Stopped");
-      }
-      pauseMediaControlAudio();
+    state.isPlaying = false;
+    startInProgress = false;
+    updatePlaybackButtons();
+    disposeToneNodes(options);
+    pauseMediaControlAudio();
+    updateStatus();
+
+    if (!options.silent) {
+      announce("Stopped");
+    }
+  }
+
+  function disposeToneNodes(options = {}) {
+    if (!oscillator && !gateGain) {
       return;
     }
 
@@ -213,34 +243,35 @@
     const oldGate = gateGain;
     oscillator = null;
     gateGain = null;
-    state.isPlaying = false;
-    updatePlaybackButtons();
 
     try {
-      if (options.immediate) {
-        oldOscillator.stop();
-        oldOscillator.disconnect();
-        oldGate.disconnect();
-      } else {
+      if (oldGate && audioContext && !options.immediate) {
         const now = audioContext.currentTime;
         oldGate.gain.cancelScheduledValues(now);
         oldGate.gain.setValueAtTime(Math.max(0, oldGate.gain.value), now);
         oldGate.gain.linearRampToValueAtTime(0, now + EDGE_FADE_SECONDS);
-        oldOscillator.stop(now + EDGE_FADE_SECONDS + 0.04);
-        window.setTimeout(() => {
-          oldOscillator.disconnect();
-          oldGate.disconnect();
-        }, 90);
+        if (oldOscillator) {
+          oldOscillator.stop(now + EDGE_FADE_SECONDS + 0.04);
+        }
+        window.setTimeout(() => disconnectToneNodes(oldOscillator, oldGate), 90);
+      } else {
+        if (oldOscillator) {
+          oldOscillator.stop();
+        }
+        disconnectToneNodes(oldOscillator, oldGate);
       }
     } catch {
-      // The node may already be stopped if the browser ended it.
+      disconnectToneNodes(oldOscillator, oldGate);
     }
+  }
 
-    updateStatus();
-    if (!options.silent) {
-      announce("Stopped");
+  function disconnectToneNodes(oldOscillator, oldGate) {
+    try {
+      oldOscillator?.disconnect();
+      oldGate?.disconnect();
+    } catch {
+      // The browser may have already disconnected a stopped node.
     }
-    pauseMediaControlAudio();
   }
 
   async function ensureAudioContext() {
@@ -439,6 +470,7 @@
 
   function handleFrequencyPointerDown(event) {
     isFrequencyPointerActive = true;
+    beginLiveInteraction();
     els.frequencySlider.setPointerCapture?.(event.pointerId);
     setFrequencyFromClientX(event.clientX);
   }
@@ -453,14 +485,22 @@
   function handleFrequencyPointerEnd(event) {
     isFrequencyPointerActive = false;
     els.frequencySlider.releasePointerCapture?.(event.pointerId);
+    endLiveInteraction();
   }
 
   function handleFrequencyTouch(event) {
     if (!event.touches.length) {
       return;
     }
+    isFrequencyPointerActive = true;
+    beginLiveInteraction();
     event.preventDefault();
     setFrequencyFromClientX(event.touches[0].clientX);
+  }
+
+  function handleFrequencyTouchEnd() {
+    isFrequencyPointerActive = false;
+    endLiveInteraction();
   }
 
   function setFrequencyFromClientX(clientX) {
@@ -477,6 +517,7 @@
 
   function handleVolumePointerDown(event) {
     isVolumePointerActive = true;
+    beginLiveInteraction();
     els.volumeSlider.setPointerCapture?.(event.pointerId);
     setVolumeFromClientX(event.clientX);
   }
@@ -491,14 +532,22 @@
   function handleVolumePointerEnd(event) {
     isVolumePointerActive = false;
     els.volumeSlider.releasePointerCapture?.(event.pointerId);
+    endLiveInteraction();
   }
 
   function handleVolumeTouch(event) {
     if (!event.touches.length) {
       return;
     }
+    isVolumePointerActive = true;
+    beginLiveInteraction();
     event.preventDefault();
     setVolumeFromClientX(event.touches[0].clientX);
+  }
+
+  function handleVolumeTouchEnd() {
+    isVolumePointerActive = false;
+    endLiveInteraction();
   }
 
   function setVolumeFromClientX(clientX) {
@@ -654,10 +703,35 @@
     lastLiveAt = Date.now();
   }
 
+  function beginLiveInteraction() {
+    if (!liveInteractionActive) {
+      cancelPendingLiveAnnouncement();
+      lastLiveAt = 0;
+    }
+    liveInteractionActive = true;
+  }
+
+  function endLiveInteraction() {
+    liveInteractionActive = false;
+    cancelPendingLiveAnnouncement();
+  }
+
+  function cancelPendingLiveAnnouncement() {
+    if (liveTimer !== null) {
+      window.clearTimeout(liveTimer);
+      liveTimer = null;
+    }
+    pendingLiveText = "";
+  }
+
   function setLiveText(text) {
+    const token = liveWriteToken + 1;
+    liveWriteToken = token;
     els.liveStatus.textContent = "";
     window.setTimeout(() => {
-      els.liveStatus.textContent = text;
+      if (token === liveWriteToken) {
+        els.liveStatus.textContent = text;
+      }
     }, 0);
   }
 
@@ -706,18 +780,18 @@
   }
 
   function handleMediaElementPlay() {
-    if (syncingMediaElement || state.isPlaying) {
+    if (mediaHelperEventsMuted || startInProgress) {
+      return;
+    }
+    if (state.isPlaying) {
+      armMediaHelperPauseSoon();
       return;
     }
     startPlayback();
   }
 
   function handleMediaElementPause() {
-    if (syncingMediaElement || !state.isPlaying) {
-      return;
-    }
-
-    if (Date.now() < ignoreMediaPauseUntil) {
+    if (mediaHelperEventsMuted || !mediaHelperPauseArmed || !state.isPlaying) {
       return;
     }
 
@@ -734,13 +808,14 @@
     }
 
     try {
-      ignoreMediaPauseUntil = Date.now() + 900;
-      syncingMediaElement = true;
+      disarmMediaHelperPause();
+      muteMediaHelperEvents();
       await els.mediaControlAudio.play();
+      armMediaHelperPauseSoon();
     } catch {
       // Web Audio still works if the browser refuses the helper element.
     } finally {
-      syncingMediaElement = false;
+      unmuteMediaHelperEventsSoon();
     }
   }
 
@@ -750,14 +825,49 @@
     }
 
     try {
-      syncingMediaElement = true;
+      disarmMediaHelperPause();
+      muteMediaHelperEvents();
       els.mediaControlAudio.pause();
       els.mediaControlAudio.currentTime = 0;
     } catch {
       // The helper element is only for media-key routing.
     } finally {
-      syncingMediaElement = false;
+      unmuteMediaHelperEventsSoon();
     }
+  }
+
+  function armMediaHelperPauseSoon() {
+    disarmMediaHelperPause();
+    mediaHelperArmTimer = window.setTimeout(() => {
+      mediaHelperPauseArmed = Boolean(state.isPlaying && els.mediaControlAudio && !els.mediaControlAudio.paused);
+      mediaHelperArmTimer = null;
+    }, MEDIA_HELPER_ARM_MS);
+  }
+
+  function disarmMediaHelperPause() {
+    mediaHelperPauseArmed = false;
+    if (mediaHelperArmTimer !== null) {
+      window.clearTimeout(mediaHelperArmTimer);
+      mediaHelperArmTimer = null;
+    }
+  }
+
+  function muteMediaHelperEvents() {
+    mediaHelperEventsMuted = true;
+    if (mediaHelperEventMuteTimer !== null) {
+      window.clearTimeout(mediaHelperEventMuteTimer);
+      mediaHelperEventMuteTimer = null;
+    }
+  }
+
+  function unmuteMediaHelperEventsSoon() {
+    if (mediaHelperEventMuteTimer !== null) {
+      window.clearTimeout(mediaHelperEventMuteTimer);
+    }
+    mediaHelperEventMuteTimer = window.setTimeout(() => {
+      mediaHelperEventsMuted = false;
+      mediaHelperEventMuteTimer = null;
+    }, MEDIA_HELPER_EVENT_MUTE_MS);
   }
 
   function createSilentWavUrl() {
