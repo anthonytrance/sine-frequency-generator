@@ -23,22 +23,6 @@ body {
   line-height: 1.5;
 }
 
-.skip-link {
-  position: absolute;
-  left: 1rem;
-  top: 0.5rem;
-  transform: translateY(-150%);
-  background: var(--text);
-  color: #ffffff;
-  padding: 0.5rem 0.75rem;
-  border-radius: 6px;
-  z-index: 20;
-}
-
-.skip-link:focus {
-  transform: translateY(0);
-}
-
 .site-header {
   padding: 2rem 1rem 0.75rem;
   max-width: 920px;
