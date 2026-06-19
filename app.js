@@ -7,6 +7,7 @@
   const FREQUENCY_SLIDER_STEPS = 1000;
   const MIN_VOLUME_DB = -80;
   const MAX_VOLUME_DB = 0;
+  const VOLUME_SLIDER_STEPS = 1000;
   const EDGE_FADE_SECONDS = 0.008;
 
   const state = {
@@ -30,10 +31,13 @@
   let pulseTimer = null;
   let pulseCursor = 0;
   let sweepTimer = null;
+  let activeSweep = null;
   let isFrequencyPointerActive = false;
+  let isVolumePointerActive = false;
   let liveTimer = null;
   let pendingLiveText = "";
   let lastLiveAt = 0;
+  let syncingMediaElement = false;
 
   document.addEventListener("DOMContentLoaded", init);
 
@@ -51,6 +55,7 @@
     els.playButton = document.getElementById("playButton");
     els.stopButton = document.getElementById("stopButton");
     els.status = document.getElementById("status");
+    els.mediaControlAudio = document.getElementById("mediaControlAudio");
     els.liveStatus = document.getElementById("liveStatus");
     els.error = document.getElementById("error");
     els.frequencyInput = document.getElementById("frequencyInput");
@@ -93,7 +98,15 @@
     });
 
     els.volumeInput.addEventListener("input", () => setVolumeDb(els.volumeInput.value, { announce: "volume" }));
-    els.volumeSlider.addEventListener("input", () => setVolumeDb(els.volumeSlider.value, { announce: "volume", throttle: true }));
+    els.volumeSlider.addEventListener("input", () => setVolumeDb(volumeSliderPositionToDb(els.volumeSlider.value), { announce: "volume", throttle: true }));
+    els.volumeSlider.addEventListener("pointerdown", handleVolumePointerDown);
+    els.volumeSlider.addEventListener("pointermove", handleVolumePointerMove);
+    els.volumeSlider.addEventListener("pointerup", handleVolumePointerEnd);
+    els.volumeSlider.addEventListener("pointercancel", handleVolumePointerEnd);
+    els.volumeSlider.addEventListener("touchstart", handleVolumeTouch, { passive: false });
+    els.volumeSlider.addEventListener("touchmove", handleVolumeTouch, { passive: false });
+    els.mediaControlAudio.addEventListener("play", handleMediaElementPlay);
+    els.mediaControlAudio.addEventListener("pause", handleMediaElementPause);
 
     els.volumeShiftButtons.forEach((button) => {
       button.addEventListener("click", () => {
@@ -143,6 +156,7 @@
       oscillator.connect(gateGain);
       gateGain.connect(outputGain);
       oscillator.start(now);
+      await startMediaControlAudio();
 
       state.isPlaying = true;
       updatePlaybackButtons();
@@ -170,6 +184,7 @@
       updatePlaybackButtons();
       updateStatus();
       announce("Stopped");
+      pauseMediaControlAudio();
       return;
     }
 
@@ -202,6 +217,7 @@
 
     updateStatus();
     announce("Stopped");
+    pauseMediaControlAudio();
   }
 
   async function ensureAudioContext() {
@@ -292,39 +308,62 @@
     const isUp = state.mode === "sweep-up";
     const start = isUp ? state.sweepStart : state.sweepEnd;
     const end = isUp ? state.sweepEnd : state.sweepStart;
-    runSweep(start, end);
+    beginSweep(start, end);
   }
 
-  function runSweep(start, end) {
+  function beginSweep(start, end) {
     if (!state.isPlaying || !audioContext || !oscillator || !gateGain) {
       return;
     }
 
     const duration = Math.max(0.05, state.sweepDuration);
-    const now = audioContext.currentTime + 0.03;
-    const endTime = now + duration;
-    const fade = Math.min(EDGE_FADE_SECONDS, duration / 4);
-
+    const now = audioContext.currentTime;
+    activeSweep = {
+      start,
+      end,
+      duration,
+      startedAt: now
+    };
     oscillator.frequency.cancelScheduledValues(now);
     oscillator.frequency.setValueAtTime(start, now);
-    oscillator.frequency.linearRampToValueAtTime(end, endTime);
+    setGateTarget(1);
 
-    gateGain.gain.cancelScheduledValues(now);
-    gateGain.gain.setValueAtTime(0, now);
-    gateGain.gain.linearRampToValueAtTime(1, now + fade);
+    updateSweepFrequency();
+    sweepTimer = window.setInterval(updateSweepFrequency, 30);
+  }
+
+  function updateSweepFrequency() {
+    if (!activeSweep || !state.isPlaying || !audioContext || !oscillator) {
+      return;
+    }
+
+    const elapsed = audioContext.currentTime - activeSweep.startedAt;
+    const progress = Math.min(1, Math.max(0, elapsed / activeSweep.duration));
+    const frequency = interpolateSweepFrequency(activeSweep.start, activeSweep.end, progress);
+    const now = audioContext.currentTime;
+    oscillator.frequency.cancelScheduledValues(now);
+    oscillator.frequency.setTargetAtTime(frequency, now, 0.01);
+
+    if (progress < 1) {
+      return;
+    }
 
     if (state.sweepLoop) {
-      if (duration > fade * 2) {
-        gateGain.gain.setValueAtTime(1, endTime - fade);
-      }
-      gateGain.gain.linearRampToValueAtTime(0, endTime);
-      sweepTimer = window.setTimeout(() => runSweep(start, end), (duration + 0.06) * 1000);
-    } else {
-      sweepTimer = window.setTimeout(() => {
-        setFrequency(end, { applyToAudio: false, announce: false });
-        updateStatus();
-      }, duration * 1000);
+      activeSweep.startedAt = now;
+      oscillator.frequency.cancelScheduledValues(now);
+      oscillator.frequency.setValueAtTime(activeSweep.start, now);
+      return;
     }
+
+    if (sweepTimer !== null) {
+      window.clearInterval(sweepTimer);
+      sweepTimer = null;
+    }
+
+    const end = activeSweep.end;
+    activeSweep = null;
+    setFrequency(end, { applyToAudio: false, announce: false });
+    updateStatus();
   }
 
   function clearModeTimers() {
@@ -334,9 +373,10 @@
     }
 
     if (sweepTimer !== null) {
-      window.clearTimeout(sweepTimer);
+      window.clearInterval(sweepTimer);
       sweepTimer = null;
     }
+    activeSweep = null;
 
     if (gateGain && audioContext) {
       const now = audioContext.currentTime;
@@ -410,6 +450,44 @@
     const position = Math.round(ratio * FREQUENCY_SLIDER_STEPS);
     els.frequencySlider.value = String(position);
     setFrequency(sliderPositionToFrequency(position), { announce: "frequency", throttle: true });
+  }
+
+  function handleVolumePointerDown(event) {
+    isVolumePointerActive = true;
+    els.volumeSlider.setPointerCapture?.(event.pointerId);
+    setVolumeFromClientX(event.clientX);
+  }
+
+  function handleVolumePointerMove(event) {
+    if (!isVolumePointerActive) {
+      return;
+    }
+    setVolumeFromClientX(event.clientX);
+  }
+
+  function handleVolumePointerEnd(event) {
+    isVolumePointerActive = false;
+    els.volumeSlider.releasePointerCapture?.(event.pointerId);
+  }
+
+  function handleVolumeTouch(event) {
+    if (!event.touches.length) {
+      return;
+    }
+    event.preventDefault();
+    setVolumeFromClientX(event.touches[0].clientX);
+  }
+
+  function setVolumeFromClientX(clientX) {
+    const rect = els.volumeSlider.getBoundingClientRect();
+    if (!rect.width) {
+      return;
+    }
+
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    const position = Math.round(ratio * VOLUME_SLIDER_STEPS);
+    els.volumeSlider.value = String(position);
+    setVolumeDb(volumeSliderPositionToDb(position), { announce: "volume", throttle: true });
   }
 
   function setVolumeDb(value, options = {}) {
@@ -487,7 +565,8 @@
     if (document.activeElement !== els.volumeInput) {
       els.volumeInput.value = value;
     }
-    els.volumeSlider.value = String(state.volumeDb);
+    els.volumeSlider.value = String(dbToVolumeSliderPosition(state.volumeDb));
+    els.volumeSlider.setAttribute("aria-valuetext", formatDb(state.volumeDb));
   }
 
   function updateModePanels() {
@@ -599,6 +678,87 @@
     updateMediaSessionState();
   }
 
+  function handleMediaElementPlay() {
+    if (syncingMediaElement || state.isPlaying) {
+      return;
+    }
+    startPlayback();
+  }
+
+  function handleMediaElementPause() {
+    if (syncingMediaElement || !state.isPlaying) {
+      return;
+    }
+    stopPlayback();
+  }
+
+  async function startMediaControlAudio() {
+    if (!els.mediaControlAudio) {
+      return;
+    }
+
+    if (!els.mediaControlAudio.src) {
+      els.mediaControlAudio.src = createSilentWavUrl();
+    }
+
+    try {
+      syncingMediaElement = true;
+      await els.mediaControlAudio.play();
+    } catch {
+      // Web Audio still works if the browser refuses the helper element.
+    } finally {
+      syncingMediaElement = false;
+    }
+  }
+
+  function pauseMediaControlAudio() {
+    if (!els.mediaControlAudio) {
+      return;
+    }
+
+    try {
+      syncingMediaElement = true;
+      els.mediaControlAudio.pause();
+      els.mediaControlAudio.currentTime = 0;
+    } catch {
+      // The helper element is only for media-key routing.
+    } finally {
+      syncingMediaElement = false;
+    }
+  }
+
+  function createSilentWavUrl() {
+    const sampleRate = 8000;
+    const seconds = 1;
+    const samples = sampleRate * seconds;
+    const dataSize = samples * 2;
+    const buffer = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buffer);
+
+    writeAscii(view, 0, "RIFF");
+    view.setUint32(4, 36 + dataSize, true);
+    writeAscii(view, 8, "WAVE");
+    writeAscii(view, 12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeAscii(view, 36, "data");
+    view.setUint32(40, dataSize, true);
+
+    const blob = new Blob([buffer], { type: "audio/wav" });
+    return URL.createObjectURL(blob);
+  }
+
+  function writeAscii(view, offset, text) {
+    for (let i = 0; i < text.length; i += 1) {
+      view.setUint8(offset + i, text.charCodeAt(i));
+    }
+  }
+
   function setMediaSessionHandler(action, handler) {
     try {
       navigator.mediaSession.setActionHandler(action, handler);
@@ -651,6 +811,26 @@
 
     const normalized = sliderPosition / FREQUENCY_SLIDER_STEPS;
     return roundNumber(LOG_SLIDER_MIN_FREQUENCY * Math.pow(MAX_FREQUENCY / LOG_SLIDER_MIN_FREQUENCY, normalized), 2);
+  }
+
+  function volumeSliderPositionToDb(position) {
+    const sliderPosition = clampNumber(position, 0, VOLUME_SLIDER_STEPS, dbToVolumeSliderPosition(state.volumeDb));
+    const normalized = sliderPosition / VOLUME_SLIDER_STEPS;
+    return roundNumber(MIN_VOLUME_DB + normalized * (MAX_VOLUME_DB - MIN_VOLUME_DB), 1);
+  }
+
+  function dbToVolumeSliderPosition(db) {
+    const value = clampNumber(db, MIN_VOLUME_DB, MAX_VOLUME_DB, state.volumeDb);
+    const normalized = (value - MIN_VOLUME_DB) / (MAX_VOLUME_DB - MIN_VOLUME_DB);
+    return Math.round(Math.min(1, Math.max(0, normalized)) * VOLUME_SLIDER_STEPS);
+  }
+
+  function interpolateSweepFrequency(start, end, progress) {
+    if (start > 0 && end > 0) {
+      return start * Math.pow(end / start, progress);
+    }
+
+    return start + (end - start) * progress;
   }
 
   function frequencyToSliderPosition(frequency) {
