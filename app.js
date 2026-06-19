@@ -11,7 +11,7 @@
   const EDGE_FADE_SECONDS = 0.008;
   const LIVE_ANNOUNCEMENTS_ENABLED = true;
   const LIVE_THROTTLE_MS = 3500;
-  const MEDIA_HELPER_ARM_MS = 1000;
+  const MEDIA_HELPER_ARM_MS = 3000;
   const MEDIA_HELPER_EVENT_MUTE_MS = 80;
   const MAJOR_SCALE_STEPS = [2, 2, 1, 2, 2, 2, 1];
 
@@ -19,8 +19,8 @@
     frequency: 440,
     volumeDb: -6,
     mode: "continuous",
-    pulseOnMs: 250,
-    pulseOffMs: 250,
+    pulseOnMs: 230,
+    pulseOffMs: 230,
     sweepStart: 20,
     sweepEnd: 20000,
     sweepDuration: 10,
@@ -49,6 +49,7 @@
   let mediaHelperPauseArmed = false;
   let mediaHelperArmTimer = null;
   let mediaHelperEventMuteTimer = null;
+  let mediaSessionSupported = false;
   let startInProgress = false;
 
   document.addEventListener("DOMContentLoaded", init);
@@ -758,7 +759,6 @@
   function updatePlaybackButtons() {
     els.playButton.disabled = false;
     els.playButton.textContent = state.isPlaying ? "Pause" : "Play";
-    els.playButton.setAttribute("aria-pressed", state.isPlaying ? "true" : "false");
     els.stopButton.disabled = !state.isPlaying;
     updateMediaSessionState();
   }
@@ -875,6 +875,8 @@
       return;
     }
 
+    mediaSessionSupported = true;
+
     if ("MediaMetadata" in window) {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: "Sine Frequency Generator",
@@ -882,14 +884,14 @@
       });
     }
 
-    setMediaSessionHandler("play", startPlayback);
-    setMediaSessionHandler("pause", () => stopPlayback());
-    setMediaSessionHandler("stop", () => stopPlayback());
+    setMediaSessionHandler("play", handleMediaPlayAction);
+    setMediaSessionHandler("pause", handleMediaPauseAction);
+    setMediaSessionHandler("stop", handleMediaStopAction);
     updateMediaSessionState();
   }
 
   function handleMediaElementPlay() {
-    if (mediaHelperEventsMuted || startInProgress) {
+    if (mediaHelperEventsMuted || mediaSessionSupported || startInProgress) {
       return;
     }
     if (state.isPlaying) {
@@ -900,10 +902,22 @@
   }
 
   function handleMediaElementPause() {
-    if (mediaHelperEventsMuted || !mediaHelperPauseArmed || !state.isPlaying) {
+    if (mediaHelperEventsMuted || mediaSessionSupported || !mediaHelperPauseArmed || !state.isPlaying) {
       return;
     }
 
+    stopPlayback();
+  }
+
+  function handleMediaPlayAction() {
+    startPlayback();
+  }
+
+  function handleMediaPauseAction() {
+    stopPlayback();
+  }
+
+  function handleMediaStopAction() {
     stopPlayback();
   }
 
@@ -1039,13 +1053,60 @@
     if (event.key === "MediaPlayPause") {
       event.preventDefault();
       togglePlayback();
+      return;
     } else if (event.key === "MediaPlay") {
       event.preventDefault();
       startPlayback();
+      return;
     } else if (event.key === "MediaPause" || event.key === "MediaStop") {
       event.preventDefault();
       stopPlayback();
+      return;
     }
+
+    if (event.altKey || event.ctrlKey || event.metaKey || shouldIgnoreShortcutTarget(event.target)) {
+      return;
+    }
+
+    const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+
+    if (key === "k" || key === " ") {
+      event.preventDefault();
+      togglePlayback();
+    } else if (key === "s") {
+      event.preventDefault();
+      stopPlayback();
+    } else if (key === "ArrowUp") {
+      event.preventDefault();
+      setVolumeDb(state.volumeDb + (event.shiftKey ? 6 : 1), { announce: "volume" });
+    } else if (key === "ArrowDown") {
+      event.preventDefault();
+      setVolumeDb(state.volumeDb - (event.shiftKey ? 6 : 1), { announce: "volume" });
+    } else if (key === "ArrowRight") {
+      event.preventDefault();
+      shiftFrequency(event.shiftKey ? 2 : Math.pow(2, 1 / 12));
+    } else if (key === "ArrowLeft") {
+      event.preventDefault();
+      shiftFrequency(event.shiftKey ? 0.5 : Math.pow(2, -1 / 12));
+    } else if (key === "]") {
+      event.preventDefault();
+      shiftMajorScale(1);
+    } else if (key === "[") {
+      event.preventDefault();
+      shiftMajorScale(-1);
+    }
+  }
+
+  function shouldIgnoreShortcutTarget(target) {
+    if (!target || target === document.body || target === document.documentElement) {
+      return false;
+    }
+
+    if (target.isContentEditable) {
+      return true;
+    }
+
+    return Boolean(target.closest("input, textarea, select, button, summary"));
   }
 
   function dbToGain(db) {

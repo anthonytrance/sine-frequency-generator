@@ -12,7 +12,7 @@ https://anthonytrance.github.io/sine-frequency-generator/
 - Frequency slider for rough changes.
 - Play and stop buttons.
 - Continuous tone mode.
-- Pulse mode, defaulting to 200 ms on and 200 ms off.
+- Pulse mode, defaulting to 230 ms on and 230 ms off.
 - Pulse edges use a short fade to reduce clicking.
 - Octave, chromatic, and major-scale frequency step buttons.
 - Volume control in dB from -80 dB to 0 dB, defaulting to -6 dB.
