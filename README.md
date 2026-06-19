@@ -2,6 +2,10 @@
 
 Accessible static web app for generating sine wave test tones in a browser.
 
+Live app:
+
+https://anthonytrance.github.io/sine-frequency-generator/
+
 ## Features
 
 - Frequency input from 0 to 22000 Hz.
