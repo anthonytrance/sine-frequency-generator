@@ -3,13 +3,15 @@
 
   const MIN_FREQUENCY = 0;
   const MAX_FREQUENCY = 22000;
+  const LOG_SLIDER_MIN_FREQUENCY = 1;
+  const FREQUENCY_SLIDER_STEPS = 1000;
   const MIN_VOLUME_DB = -80;
   const MAX_VOLUME_DB = 0;
   const EDGE_FADE_SECONDS = 0.008;
 
   const state = {
     frequency: 440,
-    volumeDb: -18,
+    volumeDb: -6,
     mode: "continuous",
     pulseOnMs: 200,
     pulseOffMs: 200,
@@ -28,6 +30,7 @@
   let pulseTimer = null;
   let pulseCursor = 0;
   let sweepTimer = null;
+  let isFrequencyPointerActive = false;
 
   document.addEventListener("DOMContentLoaded", init);
 
@@ -70,7 +73,13 @@
     setupMediaSession();
 
     els.frequencyInput.addEventListener("input", () => setFrequency(els.frequencyInput.value));
-    els.frequencySlider.addEventListener("input", () => setFrequency(els.frequencySlider.value));
+    els.frequencySlider.addEventListener("input", () => setFrequency(sliderPositionToFrequency(els.frequencySlider.value)));
+    els.frequencySlider.addEventListener("pointerdown", handleFrequencyPointerDown);
+    els.frequencySlider.addEventListener("pointermove", handleFrequencyPointerMove);
+    els.frequencySlider.addEventListener("pointerup", handleFrequencyPointerEnd);
+    els.frequencySlider.addEventListener("pointercancel", handleFrequencyPointerEnd);
+    els.frequencySlider.addEventListener("touchstart", handleFrequencyTouch, { passive: false });
+    els.frequencySlider.addEventListener("touchmove", handleFrequencyTouch, { passive: false });
 
     els.frequencyShiftButtons.forEach((button) => {
       button.addEventListener("click", () => {
@@ -355,6 +364,44 @@
     updateStatus(`${label}. ${statusText()}`);
   }
 
+  function handleFrequencyPointerDown(event) {
+    isFrequencyPointerActive = true;
+    els.frequencySlider.setPointerCapture?.(event.pointerId);
+    setFrequencyFromClientX(event.clientX);
+  }
+
+  function handleFrequencyPointerMove(event) {
+    if (!isFrequencyPointerActive) {
+      return;
+    }
+    setFrequencyFromClientX(event.clientX);
+  }
+
+  function handleFrequencyPointerEnd(event) {
+    isFrequencyPointerActive = false;
+    els.frequencySlider.releasePointerCapture?.(event.pointerId);
+  }
+
+  function handleFrequencyTouch(event) {
+    if (!event.touches.length) {
+      return;
+    }
+    event.preventDefault();
+    setFrequencyFromClientX(event.touches[0].clientX);
+  }
+
+  function setFrequencyFromClientX(clientX) {
+    const rect = els.frequencySlider.getBoundingClientRect();
+    if (!rect.width) {
+      return;
+    }
+
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    const position = Math.round(ratio * FREQUENCY_SLIDER_STEPS);
+    els.frequencySlider.value = String(position);
+    setFrequency(sliderPositionToFrequency(position));
+  }
+
   function setVolumeDb(value) {
     const next = clampNumber(value, MIN_VOLUME_DB, MAX_VOLUME_DB, state.volumeDb);
     state.volumeDb = roundNumber(next, 1);
@@ -404,7 +451,8 @@
     if (document.activeElement !== els.frequencyInput) {
       els.frequencyInput.value = value;
     }
-    els.frequencySlider.value = String(Math.round(state.frequency));
+    els.frequencySlider.value = String(frequencyToSliderPosition(state.frequency));
+    els.frequencySlider.setAttribute("aria-valuetext", formatFrequency(state.frequency));
   }
 
   function syncVolumeControls() {
@@ -433,19 +481,7 @@
   }
 
   function statusText() {
-    const base = `${state.isPlaying ? "Playing" : "Stopped"}. Mode: ${modeLabel()}. Frequency ${formatFrequency(state.frequency)}. Volume ${formatDb(state.volumeDb)}.`;
-
-    if (state.mode === "pulse") {
-      return `${base} Pulse ${state.pulseOnMs} ms on, ${state.pulseOffMs} ms off.`;
-    }
-
-    if (state.mode === "sweep-up" || state.mode === "sweep-down") {
-      const direction = state.mode === "sweep-up" ? "up" : "down";
-      const repeat = state.sweepLoop ? " Repeating." : "";
-      return `${base} Sweep ${direction} from ${formatFrequency(state.sweepStart)} to ${formatFrequency(state.sweepEnd)} over ${formatNumber(state.sweepDuration)} seconds.${repeat}`;
-    }
-
-    return base;
+    return `${state.isPlaying ? "Playing" : "Stopped"}, ${modeLabel()}, ${formatFrequency(state.frequency)}, ${formatDb(state.volumeDb)}.`;
   }
 
   function modeLabel() {
@@ -530,6 +566,26 @@
       return 0;
     }
     return Math.pow(10, db / 20);
+  }
+
+  function sliderPositionToFrequency(position) {
+    const sliderPosition = clampNumber(position, 0, FREQUENCY_SLIDER_STEPS, 0);
+    if (sliderPosition <= 0) {
+      return 0;
+    }
+
+    const normalized = sliderPosition / FREQUENCY_SLIDER_STEPS;
+    return roundNumber(LOG_SLIDER_MIN_FREQUENCY * Math.pow(MAX_FREQUENCY / LOG_SLIDER_MIN_FREQUENCY, normalized), 2);
+  }
+
+  function frequencyToSliderPosition(frequency) {
+    const value = clampNumber(frequency, MIN_FREQUENCY, MAX_FREQUENCY, 0);
+    if (value <= 0) {
+      return 0;
+    }
+
+    const normalized = Math.log(value / LOG_SLIDER_MIN_FREQUENCY) / Math.log(MAX_FREQUENCY / LOG_SLIDER_MIN_FREQUENCY);
+    return Math.round(Math.min(1, Math.max(0, normalized)) * FREQUENCY_SLIDER_STEPS);
   }
 
   function clampNumber(value, min, max, fallback) {

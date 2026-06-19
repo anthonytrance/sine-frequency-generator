@@ -16,7 +16,8 @@
 
 body {
   margin: 0;
-  background: var(--bg);
+  background:
+    linear-gradient(180deg, #eaf0ec 0, #f7f7f5 260px);
   color: var(--text);
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   line-height: 1.5;
@@ -39,25 +40,23 @@ body {
 }
 
 .site-header {
-  padding: 1.5rem 1rem 0.5rem;
+  padding: 2rem 1rem 0.75rem;
   max-width: 920px;
   margin: 0 auto;
 }
 
 .site-header h1 {
   margin: 0;
-  font-size: 2rem;
-}
-
-.site-header p {
-  margin: 0.35rem 0 0;
-  color: var(--muted);
+  font-size: clamp(2rem, 5vw, 3rem);
+  line-height: 1.05;
 }
 
 .app {
   width: min(920px, 100%);
   margin: 0 auto;
-  padding: 0.5rem 1rem 2rem;
+  padding: 0.75rem 1rem 2rem;
+  display: grid;
+  gap: 1rem;
 }
 
 .panel {
@@ -65,7 +64,7 @@ body {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 1rem;
-  margin-top: 1rem;
+  box-shadow: 0 12px 28px rgba(20, 32, 26, 0.08);
 }
 
 h2 {
@@ -100,8 +99,9 @@ input[type="number"] {
 }
 
 input[type="range"] {
-  min-height: 2.25rem;
+  min-height: 3.25rem;
   accent-color: var(--primary);
+  touch-action: none;
 }
 
 button {
@@ -114,12 +114,21 @@ button {
   font: inherit;
   font-weight: 700;
   cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, transform 120ms ease;
 }
 
 button.primary {
   background: var(--primary);
   color: #ffffff;
   border-color: var(--primary);
+}
+
+button:not(:disabled):hover {
+  border-color: var(--primary);
+}
+
+button:not(:disabled):active {
+  transform: translateY(1px);
 }
 
 button:disabled {
@@ -195,6 +204,16 @@ a:focus-visible {
 }
 
 @media (min-width: 700px) {
+  .app {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .panel:first-child,
+  #pulseSettings,
+  #sweepSettings {
+    grid-column: 1 / -1;
+  }
+
   .button-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }

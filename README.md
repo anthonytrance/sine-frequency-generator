@@ -1,6 +1,6 @@
 # Sine Frequency Generator
 
-Accessible static web app for generating sine wave test tones in a browser.
+Static web app for generating sine wave test tones in a browser.
 
 Live app:
 
@@ -15,7 +15,7 @@ https://anthonytrance.github.io/sine-frequency-generator/
 - Pulse mode, defaulting to 200 ms on and 200 ms off.
 - Pulse edges use a short fade to reduce clicking.
 - Octave, chromatic, and eighth-octave frequency step buttons.
-- Volume control in dB from -80 dB to 0 dB.
+- Volume control in dB from -80 dB to 0 dB, defaulting to -6 dB.
 - Volume step buttons for 1 dB and 6 dB changes.
 - Sweep up and sweep down modes with configurable start, end, length, and repeat.
 - Screen-reader-friendly labels, fieldsets, native controls, and live status.
