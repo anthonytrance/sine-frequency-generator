@@ -1,0 +1,205 @@
+:root {
+  color-scheme: light;
+  --bg: #f7f7f5;
+  --surface: #ffffff;
+  --text: #171717;
+  --muted: #555555;
+  --border: #b9b9b2;
+  --focus: #005fcc;
+  --primary: #143d2a;
+  --danger: #8a1f11;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+
+.skip-link {
+  position: absolute;
+  left: 1rem;
+  top: 0.5rem;
+  transform: translateY(-150%);
+  background: var(--text);
+  color: #ffffff;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  z-index: 20;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+.site-header {
+  padding: 1.5rem 1rem 0.5rem;
+  max-width: 920px;
+  margin: 0 auto;
+}
+
+.site-header h1 {
+  margin: 0;
+  font-size: 2rem;
+}
+
+.site-header p {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+}
+
+.app {
+  width: min(920px, 100%);
+  margin: 0 auto;
+  padding: 0.5rem 1rem 2rem;
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-top: 1rem;
+}
+
+h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.35rem;
+}
+
+label,
+legend {
+  font-weight: 700;
+}
+
+fieldset {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin: 1rem 0 0;
+}
+
+input[type="number"],
+input[type="range"] {
+  width: 100%;
+  margin: 0.35rem 0 0.8rem;
+}
+
+input[type="number"] {
+  min-height: 2.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+}
+
+input[type="range"] {
+  min-height: 2.25rem;
+  accent-color: var(--primary);
+}
+
+button {
+  min-height: 2.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--text);
+  padding: 0.55rem 0.8rem;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button.primary {
+  background: var(--primary);
+  color: #ffffff;
+  border-color: var(--primary);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+button:focus-visible,
+input:focus-visible,
+a:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.button-row,
+.button-grid {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.button-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.button-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 0.4rem;
+}
+
+.radio-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.radio-list label,
+.checkbox-line {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 2.25rem;
+}
+
+.checkbox-line {
+  margin-top: 1.7rem;
+}
+
+.help {
+  color: var(--muted);
+  margin: -0.25rem 0 0.85rem;
+}
+
+.status {
+  border-left: 4px solid var(--primary);
+  padding: 0.7rem 0.8rem;
+  margin: 1rem 0 0;
+  background: #eef5f0;
+}
+
+.error {
+  border-left: 4px solid var(--danger);
+  padding: 0.7rem 0.8rem;
+  margin: 1rem 0 0;
+  background: #fff1ee;
+}
+
+.two-column {
+  display: grid;
+  gap: 0.85rem;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+@media (min-width: 700px) {
+  .button-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .two-column {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

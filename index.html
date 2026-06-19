@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sine Frequency Generator</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#controls">Skip to controls</a>
+
+  <header class="site-header">
+    <h1>Sine Frequency Generator</h1>
+    <p>Accessible sine tone tool for continuous tones, pulses, and sweeps.</p>
+  </header>
+
+  <main id="controls" class="app">
+    <section class="panel" aria-labelledby="playback-heading">
+      <h2 id="playback-heading">Playback</h2>
+      <div class="button-row">
+        <button id="playButton" class="primary" type="button" aria-pressed="false">Play</button>
+        <button id="stopButton" type="button" disabled>Stop</button>
+      </div>
+
+      <fieldset>
+        <legend>Mode</legend>
+        <div class="radio-list">
+          <label>
+            <input type="radio" name="mode" value="continuous" checked>
+            Continuous tone
+          </label>
+          <label>
+            <input type="radio" name="mode" value="pulse">
+            Pulse, 200 ms on and 200 ms off
+          </label>
+          <label>
+            <input type="radio" name="mode" value="sweep-up">
+            Sweep up
+          </label>
+          <label>
+            <input type="radio" name="mode" value="sweep-down">
+            Sweep down
+          </label>
+        </div>
+      </fieldset>
+
+      <p id="status" class="status" role="status" aria-live="polite">
+        Stopped. Frequency 440 Hz. Volume -18 dB.
+      </p>
+      <p id="error" class="error" role="alert" hidden></p>
+    </section>
+
+    <section class="panel" aria-labelledby="frequency-heading">
+      <h2 id="frequency-heading">Frequency</h2>
+
+      <label for="frequencyInput">Frequency in Hz</label>
+      <input id="frequencyInput" type="number" inputmode="decimal" min="0" max="22000" step="0.01" value="440" aria-describedby="frequencyHelp">
+      <p id="frequencyHelp" class="help">Range: 0 to 22000 Hz. The generator will try to play the full range, but speakers may not reproduce the extremes.</p>
+
+      <label for="frequencySlider">Frequency slider</label>
+      <input id="frequencySlider" type="range" min="0" max="22000" step="1" value="440">
+
+      <div class="button-grid" role="group" aria-label="Frequency step buttons">
+        <button type="button" data-frequency-ratio="0.5">Octave down</button>
+        <button type="button" data-frequency-ratio="2">Octave up</button>
+        <button type="button" data-frequency-ratio="0.9438743126816935">Chromatic down</button>
+        <button type="button" data-frequency-ratio="1.0594630943592953">Chromatic up</button>
+        <button type="button" data-frequency-ratio="0.9170040432046712">Eighth-octave down</button>
+        <button type="button" data-frequency-ratio="1.0905077326652577">Eighth-octave up</button>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="volume-heading">
+      <h2 id="volume-heading">Volume</h2>
+
+      <label for="volumeInput">Volume in dB</label>
+      <input id="volumeInput" type="number" inputmode="decimal" min="-80" max="0" step="0.1" value="-18" aria-describedby="volumeHelp">
+      <p id="volumeHelp" class="help">0 dB is maximum. This controls the app output only, not the device volume.</p>
+
+      <label for="volumeSlider">Volume slider</label>
+      <input id="volumeSlider" type="range" min="-80" max="0" step="0.1" value="-18">
+
+      <div class="button-grid" role="group" aria-label="Volume step buttons">
+        <button type="button" data-volume-shift="-6">Down 6 dB</button>
+        <button type="button" data-volume-shift="-1">Down 1 dB</button>
+        <button type="button" data-volume-shift="1">Up 1 dB</button>
+        <button type="button" data-volume-shift="6">Up 6 dB</button>
+      </div>
+    </section>
+
+    <section id="pulseSettings" class="panel" aria-labelledby="pulse-heading" hidden>
+      <h2 id="pulse-heading">Pulse Settings</h2>
+      <div class="two-column">
+        <div>
+          <label for="pulseOnInput">On time in milliseconds</label>
+          <input id="pulseOnInput" type="number" inputmode="numeric" min="10" max="60000" step="1" value="200">
+        </div>
+        <div>
+          <label for="pulseOffInput">Off time in milliseconds</label>
+          <input id="pulseOffInput" type="number" inputmode="numeric" min="10" max="60000" step="1" value="200">
+        </div>
+      </div>
+      <p class="help">The pulse uses a short fade at each edge to avoid clicks.</p>
+    </section>
+
+    <section id="sweepSettings" class="panel" aria-labelledby="sweep-heading" hidden>
+      <h2 id="sweep-heading">Sweep Settings</h2>
+      <div class="two-column">
+        <div>
+          <label for="sweepStartInput">Start frequency in Hz</label>
+          <input id="sweepStartInput" type="number" inputmode="decimal" min="0" max="22000" step="0.01" value="20">
+        </div>
+        <div>
+          <label for="sweepEndInput">End frequency in Hz</label>
+          <input id="sweepEndInput" type="number" inputmode="decimal" min="0" max="22000" step="0.01" value="20000">
+        </div>
+        <div>
+          <label for="sweepDurationInput">Sweep length in seconds</label>
+          <input id="sweepDurationInput" type="number" inputmode="decimal" min="0.05" max="3600" step="0.05" value="10">
+        </div>
+        <div class="checkbox-line">
+          <input id="sweepLoopInput" type="checkbox">
+          <label for="sweepLoopInput">Repeat sweep</label>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="safety-heading">
+      <h2 id="safety-heading">Safety</h2>
+      <p>Start quietly. High frequencies and loud test tones can be unpleasant or unsafe, especially through headphones.</p>
+    </section>
+  </main>
+</body>
+</html>
