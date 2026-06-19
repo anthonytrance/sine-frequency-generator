@@ -41,6 +41,7 @@
   let lastLiveAt = 0;
   let syncingMediaElement = false;
   let startInProgress = false;
+  let ignoreMediaPauseUntil = 0;
 
   document.addEventListener("DOMContentLoaded", init);
 
@@ -715,6 +716,11 @@
     if (syncingMediaElement || !state.isPlaying) {
       return;
     }
+
+    if (Date.now() < ignoreMediaPauseUntil) {
+      return;
+    }
+
     stopPlayback();
   }
 
@@ -728,6 +734,7 @@
     }
 
     try {
+      ignoreMediaPauseUntil = Date.now() + 900;
       syncingMediaElement = true;
       await els.mediaControlAudio.play();
     } catch {
