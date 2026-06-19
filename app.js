@@ -13,6 +13,7 @@
   const LIVE_THROTTLE_MS = 3500;
   const MEDIA_HELPER_ARM_MS = 1000;
   const MEDIA_HELPER_EVENT_MUTE_MS = 80;
+  const MAJOR_SCALE_STEPS = [2, 2, 1, 2, 2, 2, 1];
 
   const state = {
     frequency: 440,
@@ -24,6 +25,7 @@
     sweepEnd: 20000,
     sweepDuration: 10,
     sweepLoop: false,
+    scaleDegree: 0,
     isPlaying: false
   };
 
@@ -82,6 +84,7 @@
     els.sweepLoopInput = document.getElementById("sweepLoopInput");
     els.modeInputs = Array.from(document.querySelectorAll('input[name="mode"]'));
     els.frequencyShiftButtons = Array.from(document.querySelectorAll("[data-frequency-ratio]"));
+    els.scaleStepButtons = Array.from(document.querySelectorAll("[data-scale-step]"));
     els.volumeShiftButtons = Array.from(document.querySelectorAll("[data-volume-shift]"));
   }
 
@@ -113,6 +116,12 @@
       button.addEventListener("click", () => {
         const ratio = Number(button.dataset.frequencyRatio);
         shiftFrequency(ratio, button.textContent.trim());
+      });
+    });
+
+    els.scaleStepButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        shiftMajorScale(Number(button.dataset.scaleStep));
       });
     });
 
@@ -489,7 +498,7 @@
 
     const end = activeSweep.end;
     activeSweep = null;
-    setFrequency(end, { applyToAudio: false, announce: false });
+        setFrequency(end, { applyToAudio: false, announce: false, keepScaleDegree: true });
     updateStatus();
   }
 
@@ -514,6 +523,9 @@
   function setFrequency(value, options = {}) {
     const next = clampNumber(value, MIN_FREQUENCY, MAX_FREQUENCY, state.frequency);
     state.frequency = roundNumber(next, 4);
+    if (!options.keepScaleDegree) {
+      state.scaleDegree = 0;
+    }
     syncFrequencyControls();
 
     if (options.applyToAudio !== false && state.isPlaying && oscillator && audioContext && state.mode !== "sweep-up" && state.mode !== "sweep-down") {
@@ -539,6 +551,30 @@
 
     setFrequency(next, { announce: false });
     announce(formatNumber(state.frequency));
+  }
+
+  function shiftMajorScale(direction) {
+    if (!direction) {
+      return;
+    }
+
+    if (state.frequency === 0) {
+      setFrequency(1, { announce: false, keepScaleDegree: true });
+    }
+
+    const semitones = getMajorScaleStepSemitones(direction);
+    const next = state.frequency * Math.pow(2, semitones / 12);
+    state.scaleDegree = positiveModulo(state.scaleDegree + direction, MAJOR_SCALE_STEPS.length);
+    setFrequency(next, { announce: false, keepScaleDegree: true });
+    announce(formatNumber(state.frequency));
+  }
+
+  function getMajorScaleStepSemitones(direction) {
+    if (direction > 0) {
+      return MAJOR_SCALE_STEPS[state.scaleDegree];
+    }
+
+    return -MAJOR_SCALE_STEPS[positiveModulo(state.scaleDegree - 1, MAJOR_SCALE_STEPS.length)];
   }
 
   function handleFrequencyPointerDown(event) {
@@ -1070,6 +1106,10 @@
   function roundNumber(value, decimals) {
     const factor = 10 ** decimals;
     return Math.round(value * factor) / factor;
+  }
+
+  function positiveModulo(value, divisor) {
+    return ((value % divisor) + divisor) % divisor;
   }
 
   function formatNumber(value) {
