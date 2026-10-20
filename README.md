@@ -9,6 +9,8 @@ https://anthonytrance.github.io/sine-frequency-generator/
 ## Features
 
 - Frequency input from 0 to 22000 Hz.
+- Default frequency of 1000 Hz when no saved frequency is available.
+- Frequency, mode, volume, pulse timings, and sweep settings are saved locally as they change. Reopening the app restores them with playback stopped.
 - Frequency slider for rough changes.
 - Play and stop buttons.
 - Continuous tone mode.
@@ -20,8 +22,9 @@ https://anthonytrance.github.io/sine-frequency-generator/
 - Volume step buttons for 1 dB and 6 dB changes.
 - Sweep up and sweep down modes with configurable start, end, length, and repeat.
 - Screen-reader-friendly labels, fieldsets, native controls, and live status.
-- Best-effort support for VoiceOver Magic Tap and media play/pause actions through the Media Session API. Automatic pauses of the silent media-control helper do not stop the tone.
+- Best-effort support for VoiceOver Magic Tap and media play/pause actions through the Media Session API. Browsers with the Audio Session API use playback audio directly, without a second silent player. Older browsers retain the silent media-control helper.
 - Temporary Web Audio interruptions retain the playback request and attempt to resume. Pause and Stop cancel pending starts and recovery.
+- An interruption reported by the Audio Session API or Web Audio is distinguished from a media pause command. The audio context is reused across Play/Pause unless it is closed or cannot resume.
 - Collapsed keyboard shortcut reference in the app.
 
 ## Local use

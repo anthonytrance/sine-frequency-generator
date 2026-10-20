@@ -10,10 +10,11 @@
   const EDGE_FADE_SECONDS = 0.008;
   const LIVE_ANNOUNCEMENTS_ENABLED = true;
   const LIVE_THROTTLE_MS = 3500;
+  const SETTINGS_STORAGE_KEY = "sine-frequency-generator.settings.v1";
   const MAJOR_SCALE_STEPS = [2, 2, 1, 2, 2, 2, 1];
 
   const state = {
-    frequency: 440,
+    frequency: 1000,
     volumeDb: -6,
     mode: "continuous",
     pulseOnMs: 230,
@@ -44,11 +45,15 @@
   let startInProgress = false;
   let playbackRequestId = 0;
   let resumeAttemptContext = null;
+  let browserAudioSession = null;
+  let useMediaControlHelper = true;
 
   document.addEventListener("DOMContentLoaded", init);
 
   function init() {
     bindElements();
+    restoreSettings();
+    syncSavedSettingsControls();
     bindEvents();
     updateModePanels();
     syncFrequencyControls();
@@ -82,6 +87,66 @@
     els.volumeShiftButtons = Array.from(document.querySelectorAll("[data-volume-shift]"));
   }
 
+  function restoreSettings() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY));
+      if (!saved || typeof saved !== "object" || Array.isArray(saved)) {
+        return;
+      }
+
+      const numbers = [
+        ["frequency", MIN_FREQUENCY, MAX_FREQUENCY, 4],
+        ["volumeDb", MIN_VOLUME_DB, MAX_VOLUME_DB, 1],
+        ["pulseOnMs", 10, 60000, 0],
+        ["pulseOffMs", 10, 60000, 0],
+        ["sweepStart", MIN_FREQUENCY, MAX_FREQUENCY, 4],
+        ["sweepEnd", MIN_FREQUENCY, MAX_FREQUENCY, 4],
+        ["sweepDuration", 0.05, 3600, 2]
+      ];
+      for (const [key, min, max, decimals] of numbers) {
+        if (typeof saved[key] === "number" && Number.isFinite(saved[key]) && saved[key] >= min && saved[key] <= max) {
+          state[key] = roundNumber(saved[key], decimals);
+        }
+      }
+      if (["continuous", "pulse", "sweep-up", "sweep-down"].includes(saved.mode)) {
+        state.mode = saved.mode;
+      }
+      if (typeof saved.sweepLoop === "boolean") {
+        state.sweepLoop = saved.sweepLoop;
+      }
+    } catch {
+      // Storage may be unavailable, or an old saved value may be invalid.
+    }
+  }
+
+  function saveSettings() {
+    try {
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({
+        frequency: state.frequency,
+        volumeDb: state.volumeDb,
+        mode: state.mode,
+        pulseOnMs: state.pulseOnMs,
+        pulseOffMs: state.pulseOffMs,
+        sweepStart: state.sweepStart,
+        sweepEnd: state.sweepEnd,
+        sweepDuration: state.sweepDuration,
+        sweepLoop: state.sweepLoop
+      }));
+    } catch {
+      // Keep the controls usable if the browser refuses local storage.
+    }
+  }
+
+  function syncSavedSettingsControls() {
+    els.modeInputs.forEach((input) => { input.checked = input.value === state.mode; });
+    els.pulseOnInput.value = String(state.pulseOnMs);
+    els.pulseOffInput.value = String(state.pulseOffMs);
+    els.sweepStartInput.value = formatNumber(state.sweepStart);
+    els.sweepEndInput.value = formatNumber(state.sweepEnd);
+    els.sweepDurationInput.value = formatNumber(state.sweepDuration);
+    els.sweepLoopInput.checked = state.sweepLoop;
+  }
+
   function bindEvents() {
     els.playButton.addEventListener("click", togglePlayback);
     els.stopButton.addEventListener("click", () => stopPlayback());
@@ -89,6 +154,7 @@
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("focus", handlePageReturn);
     window.addEventListener("pageshow", handlePageReturn);
+    setupAudioSession();
     setupMediaSession();
 
     els.frequencyInput.addEventListener("input", () => setFrequency(els.frequencyInput.value, { announce: "frequency" }));
@@ -174,7 +240,8 @@
 
     try {
       clearError();
-      await ensureAudioContext({ forceNew: true, requestId });
+      configureAudioPlayback();
+      await ensureAudioContext({ requestId });
       if (requestId !== playbackRequestId) {
         return;
       }
@@ -222,6 +289,7 @@
   }
 
   function stopPlayback(options = {}) {
+    const cancelledStart = startInProgress && !state.isPlaying;
     playbackRequestId += 1;
     resumeAttemptContext = null;
     clearModeTimers();
@@ -230,6 +298,12 @@
     startInProgress = false;
     updatePlaybackButtons();
     disposeToneNodes(options);
+    if (cancelledStart && audioContext) {
+      const cancelledContext = audioContext;
+      audioContext = null;
+      outputGain = null;
+      cancelledContext.close?.().catch?.(() => {});
+    }
     pauseMediaControlAudio();
     updateStatus();
 
@@ -284,7 +358,7 @@
       throw new Error("This browser does not support Web Audio.");
     }
 
-    if (options.forceNew || !audioContext || audioContext.state === "closed") {
+    if (!audioContext || audioContext.state === "closed") {
       createAudioContext(ContextClass);
     }
 
@@ -358,8 +432,46 @@
     recoverAudioContext();
   }
 
+  function setupAudioSession() {
+    try {
+      browserAudioSession = navigator.audioSession || null;
+      browserAudioSession?.addEventListener("statechange", () => {
+        if (state.isPlaying || startInProgress) {
+          if (browserAudioSession.state === "interrupted") {
+            updateStatus("Audio interrupted. Waiting to resume.");
+          } else {
+            recoverAudioContext();
+          }
+        }
+      });
+    } catch {
+      browserAudioSession = null;
+    }
+  }
+
+  function configureAudioPlayback() {
+    useMediaControlHelper = true;
+    try {
+      if (browserAudioSession) {
+        browserAudioSession.type = "playback";
+        useMediaControlHelper = browserAudioSession.type !== "playback";
+      }
+    } catch {
+      // Older browsers can still use the media-control helper.
+    }
+  }
+
+  function isSystemAudioInterruption() {
+    return browserAudioSession?.state === "interrupted" || audioContext?.state === "interrupted";
+  }
+
   async function recoverAudioContext() {
     if (!state.isPlaying || !audioContext || document.visibilityState === "hidden") {
+      return;
+    }
+
+    if (browserAudioSession?.state === "interrupted") {
+      updateStatus("Audio interrupted. Waiting to resume.");
       return;
     }
 
@@ -551,6 +663,7 @@
   function setFrequency(value, options = {}) {
     const next = clampNumber(value, MIN_FREQUENCY, MAX_FREQUENCY, state.frequency);
     state.frequency = roundNumber(next, 4);
+    saveSettings();
     if (!options.keepScaleDegree) {
       state.scaleDegree = 0;
     }
@@ -655,6 +768,7 @@
   function setVolumeDb(value, options = {}) {
     const next = clampNumber(value, MIN_VOLUME_DB, MAX_VOLUME_DB, state.volumeDb);
     state.volumeDb = roundNumber(next, 1);
+    saveSettings();
     syncVolumeControls();
 
     if (outputGain && audioContext) {
@@ -672,6 +786,7 @@
   function updatePulseSettings(changedField) {
     state.pulseOnMs = Math.round(clampNumber(els.pulseOnInput.value, 10, 60000, state.pulseOnMs));
     state.pulseOffMs = Math.round(clampNumber(els.pulseOffInput.value, 10, 60000, state.pulseOffMs));
+    saveSettings();
     els.pulseOnInput.value = String(state.pulseOnMs);
     els.pulseOffInput.value = String(state.pulseOffMs);
 
@@ -692,6 +807,7 @@
     state.sweepEnd = roundNumber(clampNumber(els.sweepEndInput.value, MIN_FREQUENCY, MAX_FREQUENCY, state.sweepEnd), 4);
     state.sweepDuration = roundNumber(clampNumber(els.sweepDurationInput.value, 0.05, 3600, state.sweepDuration), 2);
     state.sweepLoop = els.sweepLoopInput.checked;
+    saveSettings();
 
     els.sweepStartInput.value = formatNumber(state.sweepStart);
     els.sweepEndInput.value = formatNumber(state.sweepEnd);
@@ -825,6 +941,9 @@
   }
 
   function statusText() {
+    if ((state.isPlaying || startInProgress) && isSystemAudioInterruption()) {
+      return "Audio interrupted. Waiting to resume.";
+    }
     return `${state.isPlaying ? "Playing" : "Stopped"}, ${modeLabel()}, ${formatFrequency(state.frequency)}, ${formatDb(state.volumeDb)}.`;
   }
 
@@ -873,6 +992,12 @@
   }
 
   function handleMediaPauseAction() {
+    // WebKit also sends this action for a system interruption. It must not
+    // discard the playback request before the interruption can end.
+    if ((state.isPlaying || startInProgress) && isSystemAudioInterruption()) {
+      updateStatus("Audio interrupted. Waiting to resume.");
+      return;
+    }
     stopPlayback();
   }
 
@@ -881,7 +1006,7 @@
   }
 
   async function startMediaControlAudio() {
-    if (!els.mediaControlAudio) {
+    if (!useMediaControlHelper || !els.mediaControlAudio) {
       return;
     }
 
@@ -1049,6 +1174,7 @@
 
     input.checked = true;
     state.mode = mode;
+    saveSettings();
     updateModePanels();
     if (state.isPlaying) {
       startCurrentMode();

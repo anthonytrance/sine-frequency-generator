@@ -8,6 +8,13 @@ from playwright.sync_api import expect, sync_playwright
 
 
 APP_URL = Path(__file__).resolve().parents[1].joinpath("index.html").as_uri()
+SETTINGS_KEY = "sine-frequency-generator.settings.v1"
+NATIVE_AUDIO_SESSION = """
+window.testAudioSession = new EventTarget();
+window.testAudioSession.type = 'auto';
+window.testAudioSession.state = 'active';
+Object.defineProperty(navigator, 'audioSession', { value: window.testAudioSession });
+"""
 OBSERVE_AUDIO = """
 window.testAudioContexts = [];
 window.testMediaActions = {};
@@ -77,7 +84,7 @@ class BrowserRegressions(unittest.TestCase):
         self.page.set_default_timeout(5000)
         self.errors = []
         self.page.on("pageerror", lambda error: self.errors.append(str(error)))
-        self.page.add_init_script(OBSERVE_AUDIO)
+        self.context.add_init_script(OBSERVE_AUDIO)
 
     def tearDown(self):
         self.context.close()
@@ -96,6 +103,13 @@ class BrowserRegressions(unittest.TestCase):
 
     def volume(self):
         return float(self.page.locator("#volumeInput").input_value())
+
+    def reopen_app(self):
+        self.page.close()
+        self.page = self.context.new_page()
+        self.page.set_default_timeout(5000)
+        self.page.on("pageerror", lambda error: self.errors.append(str(error)))
+        self.page.goto(APP_URL)
 
     def signal_rms(self):
         return self.page.evaluate("""async () => {
@@ -266,6 +280,143 @@ class BrowserRegressions(unittest.TestCase):
             expect(self.page.locator("#playButton")).to_have_text("Pause")
         self.page.locator("#stopButton").click()
         expect(self.page.locator("#playButton")).to_have_text("Play")
+
+    def test_fresh_settings_default_to_1000_hz(self):
+        self.open_app()
+        expect(self.page.locator("#frequencyInput")).to_have_value("1000")
+        expect(self.page.locator("#frequencySlider")).to_have_attribute("aria-valuetext", "1000 Hz")
+        expect(self.page.locator("#status")).to_contain_text("1000 Hz")
+        expect(self.page.locator("#playButton")).to_have_text("Play")
+
+    def test_frequency_mode_and_pulse_settings_survive_closing_the_app(self):
+        self.open_app()
+        self.page.locator("#frequencyInput").fill("1750.25")
+        self.page.locator("#volumeInput").fill("-18")
+        self.page.locator("input[name=mode][value=pulse]").check()
+        self.page.locator("#pulseOnInput").fill("315")
+        self.page.locator("#pulseOffInput").fill("420")
+        self.page.locator("#pulseOffInput").blur()
+        self.reopen_app()
+        expect(self.page.locator("#frequencyInput")).to_have_value("1750.25")
+        expect(self.page.locator("#volumeInput")).to_have_value("-18")
+        expect(self.page.locator("input[name=mode][value=pulse]")).to_be_checked()
+        expect(self.page.locator("#pulseSettings")).to_be_visible()
+        expect(self.page.locator("#pulseOnInput")).to_have_value("315")
+        expect(self.page.locator("#pulseOffInput")).to_have_value("420")
+        expect(self.page.locator("#status")).to_contain_text("Stopped")
+
+    def test_zero_values_and_sweep_settings_survive_reload(self):
+        self.open_app()
+        self.page.locator("#frequencyInput").fill("0")
+        self.page.locator("#volumeInput").fill("0")
+        self.page.locator("input[name=mode][value=sweep-down]").check()
+        for selector, value in (("#sweepStartInput", "0"), ("#sweepEndInput", "3000"), ("#sweepDurationInput", "0.5")):
+            self.page.locator(selector).fill(value)
+            self.page.locator(selector).blur()
+        self.page.locator("#sweepLoopInput").check()
+        self.page.reload()
+        expect(self.page.locator("#frequencyInput")).to_have_value("0")
+        expect(self.page.locator("#volumeInput")).to_have_value("0")
+        expect(self.page.locator("input[name=mode][value=sweep-down]")).to_be_checked()
+        expect(self.page.locator("#sweepSettings")).to_be_visible()
+        expect(self.page.locator("#sweepStartInput")).to_have_value("0")
+        expect(self.page.locator("#sweepEndInput")).to_have_value("3000")
+        expect(self.page.locator("#sweepDurationInput")).to_have_value("0.5")
+        expect(self.page.locator("#sweepLoopInput")).to_be_checked()
+
+    def test_reopening_a_previously_playing_app_never_autoplays(self):
+        self.open_app()
+        self.page.locator("#frequencyInput").fill("1234")
+        self.play()
+        self.reopen_app()
+        expect(self.page.locator("#frequencyInput")).to_have_value("1234")
+        expect(self.page.locator("#status")).to_contain_text("Stopped")
+        expect(self.page.locator("#playButton")).to_have_text("Play")
+        self.assertEqual(self.page.evaluate("window.testAudioContexts.length"), 0)
+        expect(self.page.locator("#stopButton")).to_be_disabled()
+
+    def test_invalid_stored_settings_fall_back_to_defaults(self):
+        self.open_app()
+        for saved in ("not json", "[]", '{"frequency":"bad","mode":"unknown","volumeDb":100,"isPlaying":true}'):
+            with self.subTest(saved=saved):
+                self.page.evaluate("([key, value]) => localStorage.setItem(key, value)", [SETTINGS_KEY, saved])
+                self.page.reload()
+                expect(self.page.locator("#frequencyInput")).to_have_value("1000")
+                expect(self.page.locator("#volumeInput")).to_have_value("-6")
+                expect(self.page.locator("input[name=mode][value=continuous]")).to_be_checked()
+                self.assertEqual(self.page.evaluate("window.testAudioContexts.length"), 0)
+
+    def test_unavailable_storage_does_not_break_the_controls(self):
+        self.open_app("""
+          Storage.prototype.getItem = () => { throw new DOMException('Blocked', 'SecurityError'); };
+          Storage.prototype.setItem = () => { throw new DOMException('Full', 'QuotaExceededError'); };
+        """)
+        expect(self.page.locator("#frequencyInput")).to_have_value("1000")
+        self.page.locator("#frequencyInput").fill("2500")
+        self.page.locator("input[name=mode][value=pulse]").check()
+        self.page.locator("#volumeSlider").press("ArrowDown")
+        expect(self.page.locator("#status")).to_contain_text("2500 Hz")
+        self.assertEqual(self.volume(), -7)
+
+    def test_native_audio_session_does_not_start_a_competing_helper(self):
+        self.open_app(NATIVE_AUDIO_SESSION + """
+          window.testHelperStarts = 0;
+          HTMLMediaElement.prototype.play = function () {
+            window.testHelperStarts++;
+            window.testMediaActions.pause();
+            return Promise.resolve();
+          };
+        """)
+        self.play()
+        self.page.wait_for_timeout(400)
+        self.assertEqual(self.page.evaluate("window.testAudioSession.type"), "playback")
+        self.assertEqual(self.page.evaluate("window.testHelperStarts"), 0)
+        self.assertGreater(self.signal_rms(), 0.1)
+
+    def test_play_pause_reuses_the_audio_context(self):
+        self.open_app()
+        for _ in range(3):
+            self.play()
+            self.assertGreater(self.signal_rms(), 0.1)
+            self.page.locator("#playButton").click()
+            expect(self.page.locator("#playButton")).to_have_text("Play")
+        self.assertEqual(self.page.evaluate("window.testAudioContexts.length"), 1)
+
+    def test_system_pause_action_recovers_after_audio_session_interruption(self):
+        self.open_app(NATIVE_AUDIO_SESSION)
+        self.play()
+        self.page.evaluate("""async () => {
+          window.testAudioSession.state = 'interrupted';
+          window.testAudioSession.dispatchEvent(new Event('statechange'));
+          await window.testAudioContexts.at(-1).suspend();
+          window.testMediaActions.pause();
+        }""")
+        expect(self.page.locator("#playButton")).to_have_text("Pause")
+        expect(self.page.locator("#status")).to_contain_text("interrupted")
+        self.page.evaluate("""() => {
+          window.testAudioSession.state = 'active';
+          window.testAudioSession.dispatchEvent(new Event('statechange'));
+        }""")
+        self.page.wait_for_function("window.testAudioContexts.at(-1).state === 'running'")
+        expect(self.page.locator("#status")).to_contain_text("Playing")
+        self.assertGreater(self.signal_rms(), 0.1)
+
+    def test_manual_stop_during_system_interruption_is_not_undone(self):
+        self.open_app(NATIVE_AUDIO_SESSION)
+        self.play()
+        self.page.evaluate("""async () => {
+          window.testAudioSession.state = 'interrupted';
+          await window.testAudioContexts.at(-1).suspend();
+          window.testMediaActions.pause();
+        }""")
+        self.page.locator("#stopButton").click()
+        self.page.evaluate("""() => {
+          window.testAudioSession.state = 'active';
+          window.testAudioSession.dispatchEvent(new Event('statechange'));
+        }""")
+        expect(self.page.locator("#playButton")).to_have_text("Play")
+        expect(self.page.locator("#status")).to_contain_text("Stopped")
+        self.assertLess(self.signal_rms(), 0.001)
 
 
 if __name__ == "__main__":

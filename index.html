@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sine Frequency Generator</title>
   <link rel="stylesheet" href="styles.css">
-  <script src="app.js?v=20261020-1" defer></script>
+  <script src="app.js?v=20261020-2" defer></script>
 </head>
 <body>
   <header class="site-header">
@@ -43,7 +43,7 @@
       </fieldset>
 
       <p id="status" class="status">
-        Stopped, 440 Hz, -6 dB.
+        Stopped, 1000 Hz, -6 dB.
       </p>
       <audio id="mediaControlAudio" loop playsinline preload="auto" aria-hidden="true"></audio>
       <p id="liveStatus" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
@@ -54,10 +54,10 @@
       <h2 id="frequency-heading">Frequency</h2>
 
       <label for="frequencyInput">Frequency in Hz</label>
-      <input id="frequencyInput" type="number" inputmode="decimal" min="0" max="22000" step="0.01" value="440">
+      <input id="frequencyInput" type="number" inputmode="decimal" min="0" max="22000" step="0.01" value="1000">
 
       <label for="frequencySlider">Frequency slider</label>
-      <input id="frequencySlider" type="range" min="0" max="1000" step="1" value="608">
+      <input id="frequencySlider" type="range" min="0" max="1000" step="1" value="691">
 
       <details class="control-details">
         <summary>Frequency steps</summary>
