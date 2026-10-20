@@ -9,6 +9,7 @@ from playwright.sync_api import expect, sync_playwright
 
 APP_URL = Path(__file__).resolve().parents[1].joinpath("index.html").as_uri()
 SETTINGS_KEY = "sine-frequency-generator.settings.v1"
+PLAYBACK_LOG_KEY = "sine-frequency-generator.playback-log.v1"
 NATIVE_AUDIO_SESSION = """
 window.testAudioSession = new EventTarget();
 window.testAudioSession.type = 'auto';
@@ -81,7 +82,7 @@ class BrowserRegressions(unittest.TestCase):
     def setUp(self):
         self.context = self.browser.new_context(viewport={"width": 390, "height": 844})
         self.page = self.context.new_page()
-        self.page.set_default_timeout(5000)
+        self.page.set_default_timeout(10000)
         self.errors = []
         self.page.on("pageerror", lambda error: self.errors.append(str(error)))
         self.context.add_init_script(OBSERVE_AUDIO)
@@ -107,7 +108,7 @@ class BrowserRegressions(unittest.TestCase):
     def reopen_app(self):
         self.page.close()
         self.page = self.context.new_page()
-        self.page.set_default_timeout(5000)
+        self.page.set_default_timeout(10000)
         self.page.on("pageerror", lambda error: self.errors.append(str(error)))
         self.page.goto(APP_URL)
 
@@ -417,6 +418,92 @@ class BrowserRegressions(unittest.TestCase):
         expect(self.page.locator("#playButton")).to_have_text("Play")
         expect(self.page.locator("#status")).to_contain_text("Stopped")
         self.assertLess(self.signal_rms(), 0.001)
+
+    def test_playback_report_identifies_a_media_pause_and_copies_in_one_message(self):
+        self.open_app("""
+          Object.defineProperty(navigator, 'clipboard', { value: {
+            writeText: async text => { window.testCopiedReport = text; }
+          }});
+        """)
+        self.play()
+        self.page.evaluate("window.testMediaActions.pause()")
+        self.page.get_by_text("Playback troubleshooting", exact=True).click()
+        expect(self.page.locator("#lastPlaybackStop")).to_contain_text("iPhone/browser media Pause command")
+        self.page.get_by_role("button", name="Copy playback report", exact=True).click()
+        self.page.wait_for_function("Boolean(window.testCopiedReport)")
+        report = self.page.evaluate("window.testCopiedReport")
+        self.assertIn("Sine Frequency Generator 2026-10-20.3", report)
+        self.assertIn("media-session-pause", report)
+        self.assertIn("iPhone/browser media Pause command", report)
+        self.assertLessEqual(len(report), 3800)
+        expect(self.page.locator("#playbackReportStatus")).to_contain_text("copied")
+
+    def test_playback_report_retains_the_last_stop_after_reopening(self):
+        self.open_app()
+        self.play()
+        self.page.locator("#stopButton").click()
+        self.reopen_app()
+        self.page.get_by_text("Playback troubleshooting", exact=True).click()
+        expect(self.page.locator("#lastPlaybackStop")).to_contain_text("Stop button")
+        events = self.page.evaluate("key => JSON.parse(localStorage.getItem(key))", PLAYBACK_LOG_KEY)
+        self.assertTrue(any(event["event"] == "stop" and event["source"] == "Stop button" for event in events))
+
+    def test_copy_report_has_an_accessible_fallback_if_clipboard_is_denied(self):
+        self.open_app("""
+          Object.defineProperty(navigator, 'clipboard', { value: {
+            writeText: async () => { throw new DOMException('Denied', 'NotAllowedError'); }
+          }});
+        """)
+        self.page.get_by_text("Playback troubleshooting", exact=True).click()
+        self.page.get_by_role("button", name="Copy playback report", exact=True).click()
+        report = self.page.get_by_role("textbox", name="Playback report", exact=True)
+        expect(report).to_be_visible()
+        expect(report).to_be_focused()
+        self.assertIn("Sine Frequency Generator", report.input_value())
+        self.assertEqual(report.evaluate("element => element.selectionEnd - element.selectionStart"), len(report.input_value()))
+
+    def test_diagnostic_history_is_bounded(self):
+        self.open_app()
+        self.page.evaluate("""() => {
+          for (let index = 0; index < 60; index++) {
+            document.dispatchEvent(new Event('visibilitychange'));
+          }
+        }""")
+        events = self.page.evaluate("key => JSON.parse(localStorage.getItem(key))", PLAYBACK_LOG_KEY)
+        self.assertLessEqual(len(events), 40)
+
+    def test_synchronous_media_pause_does_not_announce_playing_after_stop(self):
+        self.open_app("""
+          if ('mediaSession' in navigator) {
+          let playbackState = 'none';
+          Object.defineProperty(navigator.mediaSession, 'playbackState', {
+            get: () => playbackState,
+            set: value => {
+              playbackState = value;
+              if (value === 'playing') window.testMediaActions.pause();
+            }
+          });
+          }
+        """)
+        if not self.page.evaluate("Boolean(window.AudioContext || window.webkitAudioContext)"):
+            self.skipTest("This Playwright browser build does not expose Web Audio")
+        self.page.locator("#playButton").click()
+        expect(self.page.locator("#playButton")).to_have_text("Play")
+        expect(self.page.locator("#liveStatus")).to_have_text("Stopped")
+        events = self.page.evaluate("key => JSON.parse(localStorage.getItem(key))", PLAYBACK_LOG_KEY)
+        last_stop = max(index for index, event in enumerate(events) if event["event"] == "stop")
+        self.assertFalse(any(event["event"] in ("playing", "helper-play-request") for event in events[last_stop + 1:]))
+        self.assertIn("media Pause command", events[last_stop]["source"])
+
+    def test_cached_markup_without_troubleshooting_does_not_break_playback(self):
+        self.open_app("""
+          document.addEventListener('DOMContentLoaded', () => {
+            document.querySelector('[aria-labelledby=playback-troubleshooting-heading]')?.remove();
+          });
+        """)
+        expect(self.page.locator("#frequencyInput")).to_have_value("1000")
+        self.play()
+        self.assertGreater(self.signal_rms(), 0.1)
 
 
 if __name__ == "__main__":

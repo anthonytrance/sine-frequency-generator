@@ -11,6 +11,9 @@
   const LIVE_ANNOUNCEMENTS_ENABLED = true;
   const LIVE_THROTTLE_MS = 3500;
   const SETTINGS_STORAGE_KEY = "sine-frequency-generator.settings.v1";
+  const PLAYBACK_LOG_STORAGE_KEY = "sine-frequency-generator.playback-log.v1";
+  const APP_VERSION = "2026-10-20.3";
+  const MAX_PLAYBACK_EVENTS = 40;
   const MAJOR_SCALE_STEPS = [2, 2, 1, 2, 2, 2, 1];
 
   const state = {
@@ -47,11 +50,13 @@
   let resumeAttemptContext = null;
   let browserAudioSession = null;
   let useMediaControlHelper = true;
+  let playbackEvents = [];
 
   document.addEventListener("DOMContentLoaded", init);
 
   function init() {
     bindElements();
+    restorePlaybackLog();
     restoreSettings();
     syncSavedSettingsControls();
     bindEvents();
@@ -60,6 +65,10 @@
     syncVolumeControls();
     updatePlaybackButtons();
     updateStatus();
+    if (els.appVersion) {
+      els.appVersion.textContent = `App version ${APP_VERSION}`;
+    }
+    tracePlayback("ready");
   }
 
   function bindElements() {
@@ -67,6 +76,11 @@
     els.stopButton = document.getElementById("stopButton");
     els.status = document.getElementById("status");
     els.mediaControlAudio = document.getElementById("mediaControlAudio");
+    els.appVersion = document.getElementById("appVersion");
+    els.lastPlaybackStop = document.getElementById("lastPlaybackStop");
+    els.copyPlaybackReport = document.getElementById("copyPlaybackReport");
+    els.playbackReport = document.getElementById("playbackReport");
+    els.playbackReportStatus = document.getElementById("playbackReportStatus");
     els.liveStatus = document.getElementById("liveStatus");
     els.error = document.getElementById("error");
     els.frequencyInput = document.getElementById("frequencyInput");
@@ -85,6 +99,103 @@
     els.frequencyShiftButtons = Array.from(document.querySelectorAll("[data-frequency-ratio]"));
     els.scaleStepButtons = Array.from(document.querySelectorAll("[data-scale-step]"));
     els.volumeShiftButtons = Array.from(document.querySelectorAll("[data-volume-shift]"));
+  }
+
+  function restorePlaybackLog() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(PLAYBACK_LOG_STORAGE_KEY));
+      if (Array.isArray(saved)) {
+        playbackEvents = saved.filter((entry) => entry && typeof entry === "object" && typeof entry.event === "string").slice(-MAX_PLAYBACK_EVENTS);
+      }
+    } catch {
+      // Diagnostics must never prevent playback or settings restoration.
+    }
+    updateLastPlaybackStop();
+  }
+
+  function tracePlayback(event, details = {}) {
+    try {
+      playbackEvents.push({
+        at: new Date().toISOString(),
+        version: APP_VERSION,
+        event,
+        request: playbackRequestId,
+        playing: state.isPlaying,
+        starting: startInProgress,
+        context: audioContext?.state || "none",
+        clock: audioContext ? roundNumber(audioContext.currentTime, 3) : null,
+        session: browserAudioSession?.state || "unavailable",
+        sessionType: browserAudioSession?.type || "unavailable",
+        helper: useMediaControlHelper,
+        helperPaused: els.mediaControlAudio?.paused ?? true,
+        visibility: document.visibilityState,
+        ...details
+      });
+      playbackEvents = playbackEvents.slice(-MAX_PLAYBACK_EVENTS);
+      updateLastPlaybackStop();
+      try {
+        localStorage.setItem(PLAYBACK_LOG_STORAGE_KEY, JSON.stringify(playbackEvents));
+      } catch {
+        // The current report remains available in memory if storage is blocked.
+      }
+    } catch {
+      // Playback must also work when diagnostics cannot read browser state.
+    }
+  }
+
+  function updateLastPlaybackStop() {
+    if (!els.lastPlaybackStop) {
+      return;
+    }
+    const lastStop = [...playbackEvents].reverse().find((entry) => entry.event === "stop" || entry.event === "start-error");
+    const text = lastStop
+      ? `Last stop: ${lastStop.source || lastStop.event}${lastStop.message ? `. ${lastStop.message}` : ""}.`
+      : "No playback stop recorded yet.";
+    if (els.lastPlaybackStop.textContent !== text) {
+      els.lastPlaybackStop.textContent = text;
+    }
+  }
+
+  function playbackReportText() {
+    const header = [
+      `Sine Frequency Generator ${APP_VERSION}`,
+      `Browser: ${navigator.userAgent.slice(0, 500)}`,
+      `Settings: ${state.frequency} Hz, ${state.volumeDb} dB, ${state.mode}`,
+      els.lastPlaybackStop?.textContent || "Stop details are available after refreshing the page.",
+      "Events oldest first. P/S=playing/starting; C=context; A=audio session; H=helper."
+    ].join("\n");
+    const lines = [];
+    let length = header.length;
+    for (const entry of [...playbackEvents].reverse()) {
+      const details = [entry.source, entry.key, entry.reason, entry.value, entry.message].filter(Boolean).map(String);
+      if (entry.event === "button-activation") {
+        details.push(`clicks=${entry.clicks} trusted=${entry.trusted} pointer=${entry.pointer}`);
+      }
+      const helper = entry.helper ? (entry.helperPaused ? "paused" : "playing") : "off";
+      const version = entry.version === APP_VERSION ? "" : ` v${entry.version}`;
+      const line = `${String(entry.at).slice(11, 23)} ${entry.event}${version} r${entry.request} P/S=${Number(entry.playing)}/${Number(entry.starting)} C=${entry.context}@${entry.clock} A=${entry.session}/${entry.sessionType} H=${helper} ${entry.visibility}${details.length ? ` ${details.join("; ").slice(0, 180)}` : ""}`;
+      // Keep a report short enough to paste into one Telegram message. Drop
+      // oldest whole events first, preserving the most recent stop sequence.
+      if (length + line.length + 1 > 3800) {
+        break;
+      }
+      lines.unshift(line);
+      length += line.length + 1;
+    }
+    return `${header}\n${lines.join("\n")}`;
+  }
+
+  async function copyPlaybackReport() {
+    els.playbackReport.value = playbackReportText();
+    try {
+      await navigator.clipboard.writeText(els.playbackReport.value);
+      els.playbackReportStatus.textContent = "Playback report copied. You can paste it into your message.";
+    } catch {
+      els.playbackReport.hidden = false;
+      els.playbackReport.focus();
+      els.playbackReport.select();
+      els.playbackReportStatus.textContent = "Copying was unavailable. The playback report is selected in the text field.";
+    }
   }
 
   function restoreSettings() {
@@ -148,14 +259,21 @@
   }
 
   function bindEvents() {
-    els.playButton.addEventListener("click", togglePlayback);
-    els.stopButton.addEventListener("click", () => stopPlayback());
+    els.playButton.addEventListener("click", (event) => {
+      tracePlayback("button-activation", { source: "Play/Pause button", clicks: event.detail, trusted: event.isTrusted, pointer: event.pointerType || "none" });
+      togglePlayback("Play/Pause button");
+    });
+    els.stopButton.addEventListener("click", () => stopPlayback({ source: "Stop button" }));
+    els.copyPlaybackReport?.addEventListener("click", copyPlaybackReport);
     document.addEventListener("keydown", handleGlobalKeys, true);
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("focus", handlePageReturn);
     window.addEventListener("pageshow", handlePageReturn);
     setupAudioSession();
     setupMediaSession();
+    ["play", "pause", "ended", "error"].forEach((event) => {
+      els.mediaControlAudio.addEventListener(event, () => tracePlayback(`helper-${event}`));
+    });
 
     els.frequencyInput.addEventListener("input", () => setFrequency(els.frequencyInput.value, { announce: "frequency" }));
     els.frequencySlider.addEventListener("input", () => {
@@ -219,23 +337,27 @@
     els.sweepLoopInput.addEventListener("change", () => updateSweepSettings("sweepLoop"));
   }
 
-  async function startPlayback() {
+  async function startPlayback(source = "play request") {
+    tracePlayback("play-request", { source });
     if (startInProgress) {
+      tracePlayback("play-ignored", { source, reason: "start already in progress" });
       return;
     }
 
     if (isEngineHealthy()) {
+      tracePlayback("play-ignored", { source, reason: "already playing" });
       return;
     }
 
     if (state.isPlaying) {
-      stopPlayback({ immediate: true, silent: true });
+      stopPlayback({ immediate: true, silent: true, source: "Restarting an unhealthy audio engine" });
     } else if (oscillator || gateGain) {
       disposeToneNodes({ immediate: true });
     }
 
     const requestId = ++playbackRequestId;
     startInProgress = true;
+    tracePlayback("start-pending", { source });
     updatePlaybackButtons();
 
     try {
@@ -243,6 +365,7 @@
       configureAudioPlayback();
       await ensureAudioContext({ requestId });
       if (requestId !== playbackRequestId) {
+        tracePlayback("start-cancelled", { source });
         return;
       }
 
@@ -260,14 +383,22 @@
 
       state.isPlaying = true;
       updatePlaybackButtons();
+      // A browser media callback can run synchronously while playbackState is
+      // updated. Do not continue or announce Playing after that callback stops us.
+      if (requestId !== playbackRequestId || !state.isPlaying) {
+        return;
+      }
       startCurrentMode();
       startMediaControlAudio();
       updateStatus();
       announce("Playing");
+      tracePlayback("playing", { source });
     } catch (error) {
       if (requestId !== playbackRequestId) {
+        tracePlayback("start-cancelled", { source });
         return;
       }
+      tracePlayback("start-error", { source: "Audio failed to start", message: error.message || String(error) });
       disposeToneNodes({ immediate: true });
       state.isPlaying = false;
       updatePlaybackButtons();
@@ -280,15 +411,16 @@
     }
   }
 
-  function togglePlayback() {
+  function togglePlayback(source = "play/pause request") {
     if (state.isPlaying || startInProgress) {
-      stopPlayback();
+      stopPlayback({ source });
     } else {
-      startPlayback();
+      startPlayback(source);
     }
   }
 
   function stopPlayback(options = {}) {
+    tracePlayback("stop", { source: options.source || "Unspecified stop request", silent: Boolean(options.silent) });
     const cancelledStart = startInProgress && !state.isPlaying;
     playbackRequestId += 1;
     resumeAttemptContext = null;
@@ -384,6 +516,7 @@
     const oldContext = audioContext;
 
     audioContext = new ContextClass();
+    tracePlayback("context-created");
     audioContext.addEventListener?.("statechange", handleAudioContextStateChange);
     outputGain = audioContext.createGain();
     outputGain.gain.value = dbToGain(state.volumeDb);
@@ -419,16 +552,19 @@
       return;
     }
 
+    tracePlayback("context-statechange");
     recoverAudioContext();
   }
 
   function handleVisibilityChange() {
+    tracePlayback("visibility-change");
     if (document.visibilityState !== "hidden") {
       handlePageReturn();
     }
   }
 
-  function handlePageReturn() {
+  function handlePageReturn(event) {
+    tracePlayback("page-return", { source: event?.type || "visibility" });
     recoverAudioContext();
   }
 
@@ -436,6 +572,7 @@
     try {
       browserAudioSession = navigator.audioSession || null;
       browserAudioSession?.addEventListener("statechange", () => {
+        tracePlayback("audio-session-statechange");
         if (state.isPlaying || startInProgress) {
           if (browserAudioSession.state === "interrupted") {
             updateStatus("Audio interrupted. Waiting to resume.");
@@ -459,6 +596,7 @@
     } catch {
       // Older browsers can still use the media-control helper.
     }
+    tracePlayback("audio-session-configured");
   }
 
   function isSystemAudioInterruption() {
@@ -482,7 +620,7 @@
     }
 
     if (audioContext.state === "closed") {
-      stopPlayback({ immediate: true, silent: true });
+      stopPlayback({ immediate: true, silent: true, source: "Audio context closed" });
       showError("Audio stopped. Press Play to restart.");
       return;
     }
@@ -494,6 +632,7 @@
     }
 
     resumeAttemptContext = context;
+    tracePlayback("recovery-request");
     updateStatus("Audio interrupted. Waiting to resume.");
     try {
       // Safari can suspend or interrupt Web Audio temporarily. Keep the user's
@@ -502,8 +641,10 @@
       if (requestId === playbackRequestId && context === audioContext && state.isPlaying && isAudioContextRunning()) {
         clearError();
         updateStatus();
+        tracePlayback("recovery-complete");
       }
     } catch {
+      tracePlayback("recovery-failed");
       if (requestId === playbackRequestId && context === audioContext && state.isPlaying) {
         showError("Audio could not resume. Press Pause, then Play to restart.");
       }
@@ -988,21 +1129,25 @@
   }
 
   function handleMediaPlayAction() {
-    startPlayback();
+    tracePlayback("media-session-play");
+    startPlayback("iPhone/browser media Play command");
   }
 
   function handleMediaPauseAction() {
+    tracePlayback("media-session-pause");
     // WebKit also sends this action for a system interruption. It must not
     // discard the playback request before the interruption can end.
     if ((state.isPlaying || startInProgress) && isSystemAudioInterruption()) {
       updateStatus("Audio interrupted. Waiting to resume.");
+      tracePlayback("media-pause-during-interruption");
       return;
     }
-    stopPlayback();
+    stopPlayback({ source: "iPhone/browser media Pause command" });
   }
 
   function handleMediaStopAction() {
-    stopPlayback();
+    tracePlayback("media-session-stop");
+    stopPlayback({ source: "iPhone/browser media Stop command" });
   }
 
   async function startMediaControlAudio() {
@@ -1015,12 +1160,14 @@
     }
 
     try {
+      tracePlayback("helper-play-request");
       await els.mediaControlAudio.play();
       // A late play() completion must not leave the helper running after Stop.
       if (!state.isPlaying && !startInProgress) {
         els.mediaControlAudio.pause();
       }
-    } catch {
+    } catch (error) {
+      tracePlayback("helper-play-refused", { message: error.message || String(error) });
       // Web Audio still works if the browser refuses the helper element.
     }
   }
@@ -1073,7 +1220,8 @@
   function setMediaSessionHandler(action, handler) {
     try {
       navigator.mediaSession.setActionHandler(action, handler);
-    } catch {
+    } catch (error) {
+      tracePlayback("media-handler-refused", { source: action, message: error.message || String(error) });
       // Some browsers expose Media Session but not every action.
     }
   }
@@ -1084,8 +1232,10 @@
     }
 
     try {
+      tracePlayback("media-state-write", { value: state.isPlaying ? "playing" : "paused" });
       navigator.mediaSession.playbackState = state.isPlaying ? "playing" : "paused";
-    } catch {
+    } catch (error) {
+      tracePlayback("media-state-refused", { message: error.message || String(error) });
       // Playback state is advisory, so failure is not fatal.
     }
   }
@@ -1097,15 +1247,18 @@
 
     if (event.key === "MediaPlayPause") {
       event.preventDefault();
-      togglePlayback();
+      tracePlayback("media-key", { key: event.key });
+      togglePlayback("Media Play/Pause key");
       return;
     } else if (event.key === "MediaPlay") {
       event.preventDefault();
-      startPlayback();
+      tracePlayback("media-key", { key: event.key });
+      startPlayback("Media Play key");
       return;
     } else if (event.key === "MediaPause" || event.key === "MediaStop") {
       event.preventDefault();
-      stopPlayback();
+      tracePlayback("media-key", { key: event.key });
+      stopPlayback({ source: `Media ${event.key} key` });
       return;
     }
 
@@ -1117,10 +1270,12 @@
 
     if (key === "k" || key === " ") {
       event.preventDefault();
-      togglePlayback();
+      tracePlayback("keyboard-shortcut", { key });
+      togglePlayback(`Keyboard ${key === " " ? "Space" : key}`);
     } else if (key === "s") {
       event.preventDefault();
-      stopPlayback();
+      tracePlayback("keyboard-shortcut", { key });
+      stopPlayback({ source: "Keyboard S" });
     } else if (key === "1" || key === "c") {
       event.preventDefault();
       setMode("continuous");

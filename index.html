@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sine Frequency Generator</title>
-  <link rel="stylesheet" href="styles.css">
-  <script src="app.js?v=20261020-2" defer></script>
+  <link rel="stylesheet" href="styles.css?v=20261020-3">
+  <script src="app.js?v=20261020-3" defer></script>
 </head>
 <body>
   <header class="site-header">
@@ -144,6 +144,17 @@
           <li><kbd>Shift</kbd> plus <kbd>Left</kbd> or <kbd>Right</kbd>: Octave step</li>
           <li><kbd>[</kbd> and <kbd>]</kbd>: Major-scale step</li>
         </ul>
+      </details>
+    </section>
+    <section class="panel utility-panel" aria-labelledby="playback-troubleshooting-heading">
+      <details class="control-details">
+        <summary id="playback-troubleshooting-heading">Playback troubleshooting</summary>
+        <p id="appVersion">App version 2026-10-20.3</p>
+        <p id="lastPlaybackStop">No playback stop recorded yet.</p>
+        <p>The playback report stays on this device. After an unexpected stop, copy it and paste it into your message.</p>
+        <button id="copyPlaybackReport" type="button">Copy playback report</button>
+        <p id="playbackReportStatus" role="status" aria-live="polite"></p>
+        <textarea id="playbackReport" class="playback-report" aria-label="Playback report" readonly rows="10" hidden></textarea>
       </details>
     </section>
   </main>

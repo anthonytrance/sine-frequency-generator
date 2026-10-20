@@ -26,6 +26,7 @@ https://anthonytrance.github.io/sine-frequency-generator/
 - Temporary Web Audio interruptions retain the playback request and attempt to resume. Pause and Stop cancel pending starts and recovery.
 - An interruption reported by the Audio Session API or Web Audio is distinguished from a media pause command. The audio context is reused across Play/Pause unless it is closed or cannot resume.
 - Collapsed keyboard shortcut reference in the app.
+- Playback troubleshooting includes a local, bounded event report and the exact source of the last stop. Copy the report after an unexpected stop to distinguish button activations, media commands, and audio-engine failures. Nothing is uploaded automatically.
 
 ## Local use
 
