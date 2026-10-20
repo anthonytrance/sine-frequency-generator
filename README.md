@@ -16,10 +16,12 @@ https://anthonytrance.github.io/sine-frequency-generator/
 - Pulse edges use a short fade to reduce clicking.
 - Octave, chromatic, and major-scale frequency step buttons.
 - Volume control in dB from -80 dB to 0 dB, defaulting to -6 dB.
+- Native volume slider with 1 dB steps, including screen reader adjustments.
 - Volume step buttons for 1 dB and 6 dB changes.
 - Sweep up and sweep down modes with configurable start, end, length, and repeat.
 - Screen-reader-friendly labels, fieldsets, native controls, and live status.
-- Best-effort support for VoiceOver Magic Tap and media play/pause actions through browser media controls.
+- Best-effort support for VoiceOver Magic Tap and media play/pause actions through the Media Session API. Automatic pauses of the silent media-control helper do not stop the tone.
+- Temporary Web Audio interruptions retain the playback request and attempt to resume. Pause and Stop cancel pending starts and recovery.
 - Collapsed keyboard shortcut reference in the app.
 
 ## Local use
@@ -36,3 +38,18 @@ This is a static app. To publish it:
 4. Visit the Pages URL GitHub gives you.
 
 No server or build step is required.
+
+## Regression checks
+
+With Python, Playwright, and its Chromium browser installed:
+
+```sh
+python tests/test_browser_regressions.py
+```
+
+Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to use an existing Chromium executable.
+Set `PLAYWRIGHT_BROWSER=webkit` to run the same checks with Playwright WebKit.
+Browser builds without Web Audio report the audio checks as skipped.
+These checks exercise native volume adjustments, playback interruptions,
+delayed helper events, cancellation, and media commands. Physical iPhone and
+VoiceOver testing is still needed to confirm the device-specific behavior.

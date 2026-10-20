@@ -7,12 +7,9 @@
   const FREQUENCY_SLIDER_STEPS = 1000;
   const MIN_VOLUME_DB = -80;
   const MAX_VOLUME_DB = 0;
-  const VOLUME_SLIDER_STEPS = 1000;
   const EDGE_FADE_SECONDS = 0.008;
   const LIVE_ANNOUNCEMENTS_ENABLED = true;
   const LIVE_THROTTLE_MS = 3500;
-  const MEDIA_HELPER_ARM_MS = 3000;
-  const MEDIA_HELPER_EVENT_MUTE_MS = 80;
   const MAJOR_SCALE_STEPS = [2, 2, 1, 2, 2, 2, 1];
 
   const state = {
@@ -39,18 +36,14 @@
   let sweepTimer = null;
   let activeSweep = null;
   let isFrequencyPointerActive = false;
-  let isVolumePointerActive = false;
   let liveTimer = null;
   let pendingLiveText = "";
   let lastLiveAt = 0;
   let liveWriteToken = 0;
   let liveInteractionActive = false;
-  let mediaHelperEventsMuted = false;
-  let mediaHelperPauseArmed = false;
-  let mediaHelperArmTimer = null;
-  let mediaHelperEventMuteTimer = null;
-  let mediaSessionSupported = false;
   let startInProgress = false;
+  let playbackRequestId = 0;
+  let resumeAttemptContext = null;
 
   document.addEventListener("DOMContentLoaded", init);
 
@@ -128,20 +121,15 @@
 
     els.volumeInput.addEventListener("input", () => setVolumeDb(els.volumeInput.value, { announce: "volume" }));
     els.volumeSlider.addEventListener("input", () => {
-      if (!isVolumePointerActive) {
-        setVolumeDb(volumeSliderPositionToDb(els.volumeSlider.value), { announce: "volume", throttle: true });
-      }
+      const requestedDb = Number(els.volumeSlider.value);
+      const change = requestedDb - state.volumeDb;
+      // A fractional value entered in the number field must not make the next
+      // accessibility adjustment smaller than 1 dB (except at a range limit).
+      const nextDb = change !== 0 && Math.abs(change) < 1
+        ? state.volumeDb + Math.sign(change)
+        : requestedDb;
+      setVolumeDb(nextDb);
     });
-    els.volumeSlider.addEventListener("pointerdown", handleVolumePointerDown);
-    els.volumeSlider.addEventListener("pointermove", handleVolumePointerMove);
-    els.volumeSlider.addEventListener("pointerup", handleVolumePointerEnd);
-    els.volumeSlider.addEventListener("pointercancel", handleVolumePointerEnd);
-    els.volumeSlider.addEventListener("touchstart", handleVolumeTouch, { passive: false });
-    els.volumeSlider.addEventListener("touchmove", handleVolumeTouch, { passive: false });
-    els.volumeSlider.addEventListener("touchend", handleVolumeTouchEnd);
-    els.volumeSlider.addEventListener("touchcancel", handleVolumeTouchEnd);
-    els.mediaControlAudio.addEventListener("play", handleMediaElementPlay);
-    els.mediaControlAudio.addEventListener("pause", handleMediaElementPause);
 
     els.volumeShiftButtons.forEach((button) => {
       button.addEventListener("click", () => {
@@ -171,8 +159,6 @@
     }
 
     if (isEngineHealthy()) {
-      startCurrentMode();
-      startMediaControlAudio();
       return;
     }
 
@@ -182,12 +168,16 @@
       disposeToneNodes({ immediate: true });
     }
 
+    const requestId = ++playbackRequestId;
     startInProgress = true;
     updatePlaybackButtons();
 
     try {
       clearError();
-      await ensureAudioContext({ forceNew: true });
+      await ensureAudioContext({ forceNew: true, requestId });
+      if (requestId !== playbackRequestId) {
+        return;
+      }
 
       const now = audioContext.currentTime;
       oscillator = audioContext.createOscillator();
@@ -208,18 +198,23 @@
       updateStatus();
       announce("Playing");
     } catch (error) {
+      if (requestId !== playbackRequestId) {
+        return;
+      }
       disposeToneNodes({ immediate: true });
       state.isPlaying = false;
       updatePlaybackButtons();
       showError(error.message || "Could not start audio.");
     } finally {
-      startInProgress = false;
-      updatePlaybackButtons();
+      if (requestId === playbackRequestId) {
+        startInProgress = false;
+        updatePlaybackButtons();
+      }
     }
   }
 
   function togglePlayback() {
-    if (state.isPlaying) {
+    if (state.isPlaying || startInProgress) {
       stopPlayback();
     } else {
       startPlayback();
@@ -227,6 +222,8 @@
   }
 
   function stopPlayback(options = {}) {
+    playbackRequestId += 1;
+    resumeAttemptContext = null;
     clearModeTimers();
 
     state.isPlaying = false;
@@ -292,10 +289,16 @@
     }
 
     await resumeAudioContext();
+    if (options.requestId !== playbackRequestId) {
+      return;
+    }
 
     if (!isAudioContextRunning()) {
       createAudioContext(ContextClass);
       await resumeAudioContext();
+    }
+    if (options.requestId !== playbackRequestId) {
+      return;
     }
 
     if (!isAudioContextRunning()) {
@@ -342,15 +345,7 @@
       return;
     }
 
-    if (!state.isPlaying || document.visibilityState === "hidden") {
-      return;
-    }
-
-    window.setTimeout(() => {
-      if (state.isPlaying && !isEngineHealthy() && document.visibilityState !== "hidden") {
-        stopPlayback({ immediate: true, silent: true });
-      }
-    }, 300);
+    recoverAudioContext();
   }
 
   function handleVisibilityChange() {
@@ -360,12 +355,50 @@
   }
 
   function handlePageReturn() {
-    if (document.visibilityState === "hidden") {
+    recoverAudioContext();
+  }
+
+  async function recoverAudioContext() {
+    if (!state.isPlaying || !audioContext || document.visibilityState === "hidden") {
       return;
     }
 
-    if (state.isPlaying && !isEngineHealthy()) {
+    if (isAudioContextRunning()) {
+      clearError();
+      updateStatus();
+      return;
+    }
+
+    if (audioContext.state === "closed") {
       stopPlayback({ immediate: true, silent: true });
+      showError("Audio stopped. Press Play to restart.");
+      return;
+    }
+
+    const context = audioContext;
+    const requestId = playbackRequestId;
+    if (resumeAttemptContext === context) {
+      return;
+    }
+
+    resumeAttemptContext = context;
+    updateStatus("Audio interrupted. Waiting to resume.");
+    try {
+      // Safari can suspend or interrupt Web Audio temporarily. Keep the user's
+      // playback request and tone nodes instead of turning this into a Stop.
+      await context.resume();
+      if (requestId === playbackRequestId && context === audioContext && state.isPlaying && isAudioContextRunning()) {
+        clearError();
+        updateStatus();
+      }
+    } catch {
+      if (requestId === playbackRequestId && context === audioContext && state.isPlaying) {
+        showError("Audio could not resume. Press Pause, then Play to restart.");
+      }
+    } finally {
+      if (resumeAttemptContext === context) {
+        resumeAttemptContext = null;
+      }
     }
   }
 
@@ -619,53 +652,6 @@
     setFrequency(sliderPositionToFrequency(position), { announce: "frequency", throttle: true });
   }
 
-  function handleVolumePointerDown(event) {
-    isVolumePointerActive = true;
-    beginLiveInteraction();
-    els.volumeSlider.setPointerCapture?.(event.pointerId);
-    setVolumeFromClientX(event.clientX);
-  }
-
-  function handleVolumePointerMove(event) {
-    if (!isVolumePointerActive) {
-      return;
-    }
-    setVolumeFromClientX(event.clientX);
-  }
-
-  function handleVolumePointerEnd(event) {
-    isVolumePointerActive = false;
-    els.volumeSlider.releasePointerCapture?.(event.pointerId);
-    endLiveInteraction();
-  }
-
-  function handleVolumeTouch(event) {
-    if (!event.touches.length) {
-      return;
-    }
-    isVolumePointerActive = true;
-    beginLiveInteraction();
-    event.preventDefault();
-    setVolumeFromClientX(event.touches[0].clientX);
-  }
-
-  function handleVolumeTouchEnd() {
-    isVolumePointerActive = false;
-    endLiveInteraction();
-  }
-
-  function setVolumeFromClientX(clientX) {
-    const rect = els.volumeSlider.getBoundingClientRect();
-    if (!rect.width) {
-      return;
-    }
-
-    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-    const position = Math.round(ratio * VOLUME_SLIDER_STEPS);
-    els.volumeSlider.value = String(position);
-    setVolumeDb(volumeSliderPositionToDb(position), { announce: "volume", throttle: true });
-  }
-
   function setVolumeDb(value, options = {}) {
     const next = clampNumber(value, MIN_VOLUME_DB, MAX_VOLUME_DB, state.volumeDb);
     state.volumeDb = roundNumber(next, 1);
@@ -741,7 +727,7 @@
     if (document.activeElement !== els.volumeInput) {
       els.volumeInput.value = value;
     }
-    els.volumeSlider.value = String(dbToVolumeSliderPosition(state.volumeDb));
+    els.volumeSlider.value = String(state.volumeDb);
     els.volumeSlider.setAttribute("aria-valuetext", formatDb(state.volumeDb));
   }
 
@@ -752,8 +738,8 @@
 
   function updatePlaybackButtons() {
     els.playButton.disabled = false;
-    els.playButton.textContent = state.isPlaying ? "Pause" : "Play";
-    els.stopButton.disabled = !state.isPlaying;
+    els.playButton.textContent = state.isPlaying || startInProgress ? "Pause" : "Play";
+    els.stopButton.disabled = !state.isPlaying && !startInProgress;
     updateMediaSessionState();
   }
 
@@ -869,8 +855,6 @@
       return;
     }
 
-    mediaSessionSupported = true;
-
     if ("MediaMetadata" in window) {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: "Sine Frequency Generator",
@@ -882,25 +866,6 @@
     setMediaSessionHandler("pause", handleMediaPauseAction);
     setMediaSessionHandler("stop", handleMediaStopAction);
     updateMediaSessionState();
-  }
-
-  function handleMediaElementPlay() {
-    if (mediaHelperEventsMuted || mediaSessionSupported || startInProgress) {
-      return;
-    }
-    if (state.isPlaying) {
-      armMediaHelperPauseSoon();
-      return;
-    }
-    startPlayback();
-  }
-
-  function handleMediaElementPause() {
-    if (mediaHelperEventsMuted || mediaSessionSupported || !mediaHelperPauseArmed || !state.isPlaying) {
-      return;
-    }
-
-    stopPlayback();
   }
 
   function handleMediaPlayAction() {
@@ -925,14 +890,13 @@
     }
 
     try {
-      disarmMediaHelperPause();
-      muteMediaHelperEvents();
       await els.mediaControlAudio.play();
-      armMediaHelperPauseSoon();
+      // A late play() completion must not leave the helper running after Stop.
+      if (!state.isPlaying && !startInProgress) {
+        els.mediaControlAudio.pause();
+      }
     } catch {
       // Web Audio still works if the browser refuses the helper element.
-    } finally {
-      unmuteMediaHelperEventsSoon();
     }
   }
 
@@ -942,49 +906,11 @@
     }
 
     try {
-      disarmMediaHelperPause();
-      muteMediaHelperEvents();
       els.mediaControlAudio.pause();
       els.mediaControlAudio.currentTime = 0;
     } catch {
       // The helper element is only for media-key routing.
-    } finally {
-      unmuteMediaHelperEventsSoon();
     }
-  }
-
-  function armMediaHelperPauseSoon() {
-    disarmMediaHelperPause();
-    mediaHelperArmTimer = window.setTimeout(() => {
-      mediaHelperPauseArmed = Boolean(state.isPlaying && els.mediaControlAudio && !els.mediaControlAudio.paused);
-      mediaHelperArmTimer = null;
-    }, MEDIA_HELPER_ARM_MS);
-  }
-
-  function disarmMediaHelperPause() {
-    mediaHelperPauseArmed = false;
-    if (mediaHelperArmTimer !== null) {
-      window.clearTimeout(mediaHelperArmTimer);
-      mediaHelperArmTimer = null;
-    }
-  }
-
-  function muteMediaHelperEvents() {
-    mediaHelperEventsMuted = true;
-    if (mediaHelperEventMuteTimer !== null) {
-      window.clearTimeout(mediaHelperEventMuteTimer);
-      mediaHelperEventMuteTimer = null;
-    }
-  }
-
-  function unmuteMediaHelperEventsSoon() {
-    if (mediaHelperEventMuteTimer !== null) {
-      window.clearTimeout(mediaHelperEventMuteTimer);
-    }
-    mediaHelperEventMuteTimer = window.setTimeout(() => {
-      mediaHelperEventsMuted = false;
-      mediaHelperEventMuteTimer = null;
-    }, MEDIA_HELPER_EVENT_MUTE_MS);
   }
 
   function createSilentWavUrl() {
@@ -1146,18 +1072,6 @@
 
     const normalized = sliderPosition / FREQUENCY_SLIDER_STEPS;
     return roundNumber(LOG_SLIDER_MIN_FREQUENCY * Math.pow(MAX_FREQUENCY / LOG_SLIDER_MIN_FREQUENCY, normalized), 2);
-  }
-
-  function volumeSliderPositionToDb(position) {
-    const sliderPosition = clampNumber(position, 0, VOLUME_SLIDER_STEPS, dbToVolumeSliderPosition(state.volumeDb));
-    const normalized = sliderPosition / VOLUME_SLIDER_STEPS;
-    return roundNumber(MIN_VOLUME_DB + normalized * (MAX_VOLUME_DB - MIN_VOLUME_DB), 1);
-  }
-
-  function dbToVolumeSliderPosition(db) {
-    const value = clampNumber(db, MIN_VOLUME_DB, MAX_VOLUME_DB, state.volumeDb);
-    const normalized = (value - MIN_VOLUME_DB) / (MAX_VOLUME_DB - MIN_VOLUME_DB);
-    return Math.round(Math.min(1, Math.max(0, normalized)) * VOLUME_SLIDER_STEPS);
   }
 
   function interpolateSweepFrequency(start, end, progress) {
