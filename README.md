@@ -12,7 +12,7 @@ https://anthonytrance.github.io/sine-frequency-generator/
 - Default frequency of 1000 Hz when no saved frequency is available.
 - Frequency, mode, volume, pulse timings, and sweep settings are saved locally as they change. Reopening the app restores them with playback stopped.
 - Frequency slider for rough changes.
-- Play and stop buttons.
+- Separate Play, Pause, and Stop buttons. Play only starts playback, so repeated accessibility activations cannot toggle it back to stopped.
 - Continuous tone mode.
 - Pulse mode, defaulting to 230 ms on and 230 ms off.
 - Pulse edges use a short fade to reduce clicking.
@@ -26,7 +26,7 @@ https://anthonytrance.github.io/sine-frequency-generator/
 - Temporary Web Audio interruptions retain the playback request and attempt to resume. Pause and Stop cancel pending starts and recovery.
 - An interruption reported by the Audio Session API or Web Audio is distinguished from a media pause command. The audio context is reused across Play/Pause unless it is closed or cannot resume.
 - Collapsed keyboard shortcut reference in the app.
-- Playback troubleshooting includes a local, bounded event report and the exact source of the last stop. Copy the report after an unexpected stop to distinguish button activations, media commands, and audio-engine failures. Nothing is uploaded automatically.
+- Playback troubleshooting includes a local, bounded event report and the exact source of the last stop. Copy uses selection-based copying with a timed Clipboard API fallback, and leaves the report available for manual copying. Nothing is uploaded automatically.
 
 ## Local use
 

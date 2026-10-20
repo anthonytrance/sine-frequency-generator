@@ -12,7 +12,7 @@
   const LIVE_THROTTLE_MS = 3500;
   const SETTINGS_STORAGE_KEY = "sine-frequency-generator.settings.v1";
   const PLAYBACK_LOG_STORAGE_KEY = "sine-frequency-generator.playback-log.v1";
-  const APP_VERSION = "2026-10-20.3";
+  const APP_VERSION = "2026-10-20.4";
   const MAX_PLAYBACK_EVENTS = 40;
   const MAJOR_SCALE_STEPS = [2, 2, 1, 2, 2, 2, 1];
 
@@ -74,6 +74,15 @@
   function bindElements() {
     els.playButton = document.getElementById("playButton");
     els.stopButton = document.getElementById("stopButton");
+    els.pauseButton = document.getElementById("pauseButton");
+    if (!els.pauseButton) {
+      // A cached HTML page may load the new script before the new markup.
+      els.pauseButton = document.createElement("button");
+      els.pauseButton.id = "pauseButton";
+      els.pauseButton.type = "button";
+      els.pauseButton.textContent = "Pause";
+      els.stopButton.before(els.pauseButton);
+    }
     els.status = document.getElementById("status");
     els.mediaControlAudio = document.getElementById("mediaControlAudio");
     els.appVersion = document.getElementById("appVersion");
@@ -187,14 +196,38 @@
 
   async function copyPlaybackReport() {
     els.playbackReport.value = playbackReportText();
+    els.playbackReport.hidden = false;
+    els.playbackReport.focus();
+    els.playbackReport.select();
+    els.playbackReport.setSelectionRange(0, els.playbackReport.value.length);
+    els.playbackReportStatus.textContent = "Copying playback report...";
+
+    let copied = false;
     try {
-      await navigator.clipboard.writeText(els.playbackReport.value);
-      els.playbackReportStatus.textContent = "Playback report copied. You can paste it into your message.";
+      // Safari's clipboard promise can reject or remain pending after a
+      // VoiceOver activation. Try selection-based copy in the user gesture.
+      copied = document.execCommand("copy");
     } catch {
-      els.playbackReport.hidden = false;
-      els.playbackReport.focus();
-      els.playbackReport.select();
-      els.playbackReportStatus.textContent = "Copying was unavailable. The playback report is selected in the text field.";
+      // Continue with the Clipboard API and the already selected text field.
+    }
+    let copyTimer = null;
+    try {
+      if (!copied) {
+        await Promise.race([
+          navigator.clipboard.writeText(els.playbackReport.value),
+          new Promise((resolve, reject) => {
+            copyTimer = window.setTimeout(() => reject(new Error("Clipboard request timed out")), 1500);
+          })
+        ]);
+      }
+      els.playbackReportStatus.textContent = "Playback report copied. You can paste it into your message.";
+      els.copyPlaybackReport.focus();
+    } catch {
+      els.playbackReportStatus.textContent = "Automatic copying was unavailable. The report is selected below. Use Copy from the text selection menu.";
+    } finally {
+      if (copyTimer !== null) {
+        window.clearTimeout(copyTimer);
+      }
     }
   }
 
@@ -260,9 +293,10 @@
 
   function bindEvents() {
     els.playButton.addEventListener("click", (event) => {
-      tracePlayback("button-activation", { source: "Play/Pause button", clicks: event.detail, trusted: event.isTrusted, pointer: event.pointerType || "none" });
-      togglePlayback("Play/Pause button");
+      tracePlayback("button-activation", { source: "Play button", clicks: event.detail, trusted: event.isTrusted, pointer: event.pointerType || "none" });
+      startPlayback("Play button");
     });
+    els.pauseButton.addEventListener("click", () => stopPlayback({ source: "Pause button" }));
     els.stopButton.addEventListener("click", () => stopPlayback({ source: "Stop button" }));
     els.copyPlaybackReport?.addEventListener("click", copyPlaybackReport);
     document.addEventListener("keydown", handleGlobalKeys, true);
@@ -995,7 +1029,8 @@
 
   function updatePlaybackButtons() {
     els.playButton.disabled = false;
-    els.playButton.textContent = state.isPlaying || startInProgress ? "Pause" : "Play";
+    els.playButton.textContent = "Play";
+    els.pauseButton.disabled = !state.isPlaying && !startInProgress;
     els.stopButton.disabled = !state.isPlaying && !startInProgress;
     updateMediaSessionState();
   }
