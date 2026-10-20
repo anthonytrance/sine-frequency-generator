@@ -12,7 +12,7 @@
   const LIVE_THROTTLE_MS = 3500;
   const SETTINGS_STORAGE_KEY = "sine-frequency-generator.settings.v1";
   const PLAYBACK_LOG_STORAGE_KEY = "sine-frequency-generator.playback-log.v1";
-  const APP_VERSION = "2026-10-20.4";
+  const APP_VERSION = "2026-10-20.5";
   const MAX_PLAYBACK_EVENTS = 40;
   const MAJOR_SCALE_STEPS = [2, 2, 1, 2, 2, 2, 1];
 
@@ -49,7 +49,6 @@
   let playbackRequestId = 0;
   let resumeAttemptContext = null;
   let browserAudioSession = null;
-  let useMediaControlHelper = true;
   let playbackEvents = [];
 
   document.addEventListener("DOMContentLoaded", init);
@@ -135,7 +134,7 @@
         clock: audioContext ? roundNumber(audioContext.currentTime, 3) : null,
         session: browserAudioSession?.state || "unavailable",
         sessionType: browserAudioSession?.type || "unavailable",
-        helper: useMediaControlHelper,
+        helper: Boolean(els.mediaControlAudio?.src),
         helperPaused: els.mediaControlAudio?.paused ?? true,
         visibility: document.visibilityState,
         ...details
@@ -397,6 +396,13 @@
     try {
       clearError();
       configureAudioPlayback();
+      // Keep the media element eligible for system Play/Pause commands, even
+      // with Audio Session support. Start it inside the activating gesture,
+      // before awaiting Web Audio, so Safari can grant media playback access.
+      startMediaControlAudio();
+      if (requestId !== playbackRequestId) {
+        return;
+      }
       await ensureAudioContext({ requestId });
       if (requestId !== playbackRequestId) {
         tracePlayback("start-cancelled", { source });
@@ -423,7 +429,6 @@
         return;
       }
       startCurrentMode();
-      startMediaControlAudio();
       updateStatus();
       announce("Playing");
       tracePlayback("playing", { source });
@@ -435,6 +440,7 @@
       tracePlayback("start-error", { source: "Audio failed to start", message: error.message || String(error) });
       disposeToneNodes({ immediate: true });
       state.isPlaying = false;
+      pauseMediaControlAudio();
       updatePlaybackButtons();
       showError(error.message || "Could not start audio.");
     } finally {
@@ -621,15 +627,16 @@
   }
 
   function configureAudioPlayback() {
-    useMediaControlHelper = true;
     try {
       if (browserAudioSession) {
         browserAudioSession.type = "playback";
-        useMediaControlHelper = browserAudioSession.type !== "playback";
       }
     } catch {
-      // Older browsers can still use the media-control helper.
+      // Media Session controls remain available without Audio Session support.
     }
+    // Audio Session selects the output category, but cannot replace the media
+    // element. WebKit routes remote commands straight to a bare AudioContext,
+    // bypassing our Media Session handlers and looking like an interruption.
     tracePlayback("audio-session-configured");
   }
 
@@ -1186,7 +1193,7 @@
   }
 
   async function startMediaControlAudio() {
-    if (!useMediaControlHelper || !els.mediaControlAudio) {
+    if (!els.mediaControlAudio) {
       return;
     }
 

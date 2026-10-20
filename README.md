@@ -22,7 +22,7 @@ https://anthonytrance.github.io/sine-frequency-generator/
 - Volume step buttons for 1 dB and 6 dB changes.
 - Sweep up and sweep down modes with configurable start, end, length, and repeat.
 - Screen-reader-friendly labels, fieldsets, native controls, and live status.
-- Best-effort support for VoiceOver Magic Tap and media play/pause actions through the Media Session API. Browsers with the Audio Session API use playback audio directly, without a second silent player. Older browsers retain the silent media-control helper.
+- Best-effort support for VoiceOver Magic Tap and media play/pause actions through the Media Session API. A silent media element connects system controls to the app's handlers, including on browsers with the Audio Session API. It starts in the activating gesture before Web Audio resumes, and pauses when playback stops. Its raw play/pause events never toggle the tone.
 - Temporary Web Audio interruptions retain the playback request and attempt to resume. Pause and Stop cancel pending starts and recovery.
 - An interruption reported by the Audio Session API or Web Audio is distinguished from a media pause command. The audio context is reused across Play/Pause unless it is closed or cannot resume.
 - Collapsed keyboard shortcut reference in the app.
@@ -43,6 +43,16 @@ This is a static app. To publish it:
 
 No server or build step is required.
 
+## System media controls
+
+Audio Session selects the playback category, but it does not replace the media
+element used for remote controls. WebKit handles commands for a bare
+[AudioContext directly](https://github.com/WebKit/WebKit/blob/main/Source/WebCore/Modules/webaudio/AudioContext.cpp),
+whereas a [media element dispatches to Media Session handlers](https://github.com/WebKit/WebKit/blob/main/Source/WebCore/html/MediaElementSession.cpp).
+Keeping the silent element available lets the app distinguish a system Pause
+command from a temporary Web Audio interruption. Its raw playback events only
+record diagnostics and cannot stop the tone.
+
 ## Regression checks
 
 With Python, Playwright, and its Chromium browser installed:
@@ -55,5 +65,7 @@ Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to use an existing Chromium executable.
 Set `PLAYWRIGHT_BROWSER=webkit` to run the same checks with Playwright WebKit.
 Browser builds without Web Audio report the audio checks as skipped.
 These checks exercise native volume adjustments, playback interruptions,
-delayed helper events, cancellation, and media commands. Physical iPhone and
-VoiceOver testing is still needed to confirm the device-specific behavior.
+delayed helper events, cancellation, and media commands with and without Audio
+Session support. System command dispatch is simulated while the real media
+element and tone are checked. Physical iPhone and VoiceOver testing is still
+needed to confirm the device-specific behavior.

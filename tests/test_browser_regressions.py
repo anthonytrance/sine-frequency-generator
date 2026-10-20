@@ -407,20 +407,70 @@ class BrowserRegressions(unittest.TestCase):
         expect(self.page.locator("#status")).to_contain_text("2500 Hz")
         self.assertEqual(self.volume(), -7)
 
-    def test_native_audio_session_does_not_start_a_competing_helper(self):
+    def test_native_audio_session_keeps_remote_play_pause_connected(self):
+        self.open_app(NATIVE_AUDIO_SESSION)
+        self.play()
+        self.page.wait_for_function("!document.getElementById('mediaControlAudio').paused")
+        self.assertEqual(self.page.evaluate("window.testAudioSession.type"), "playback")
+        # WebKit maps a remote toggle to Play or Pause using its media
+        # element's state. Exercise that route while inspecting the real tone.
+        for _ in range(2):
+            self.page.evaluate("""() => {
+              const audio = document.getElementById('mediaControlAudio');
+              window.testMediaActions[audio.paused ? 'play' : 'pause']();
+            }""")
+            expect(self.page.locator("#status")).to_contain_text("Stopped")
+            self.assertTrue(self.page.locator("#mediaControlAudio").evaluate("audio => audio.paused"))
+            self.assertEqual(self.page.evaluate("navigator.mediaSession.playbackState"), "paused")
+            self.assertLess(self.signal_rms(), 0.001)
+            self.page.wait_for_timeout(300)
+            expect(self.page.locator("#status")).to_contain_text("Stopped")
+            self.page.evaluate("""() => {
+              const audio = document.getElementById('mediaControlAudio');
+              window.testMediaActions[audio.paused ? 'play' : 'pause']();
+            }""")
+            expect(self.page.locator("#status")).to_contain_text("Playing")
+            self.page.wait_for_function("!document.getElementById('mediaControlAudio').paused")
+            self.assertEqual(self.page.evaluate("navigator.mediaSession.playbackState"), "playing")
+            self.assertGreater(self.signal_rms(), 0.1)
+        self.assertEqual(self.page.evaluate("window.testAudioContexts.length"), 1)
+
+    def test_media_controls_are_primed_before_web_audio_finishes_starting(self):
+        self.open_app(NATIVE_AUDIO_SESSION + "window.testDelayStart = true;")
+        self.play(wait_for_audio=False)
+        self.page.wait_for_function("Boolean(window.testReleaseStart)")
+        self.page.wait_for_function("!document.getElementById('mediaControlAudio').paused")
+        self.page.evaluate("window.testMediaActions.pause()")
+        self.page.evaluate("window.testReleaseStart()")
+        self.page.wait_for_timeout(300)
+        expect(self.page.locator("#status")).to_contain_text("Stopped")
+        self.assertTrue(self.page.locator("#mediaControlAudio").evaluate("audio => audio.paused"))
+        expect(self.page.locator("#pauseButton")).to_be_disabled()
+
+    def test_refused_media_control_audio_does_not_break_the_tone(self):
         self.open_app(NATIVE_AUDIO_SESSION + """
-          window.testHelperStarts = 0;
           HTMLMediaElement.prototype.play = function () {
-            window.testHelperStarts++;
+            return Promise.reject(new DOMException('Denied', 'NotAllowedError'));
+          };
+        """)
+        self.play()
+        self.assertGreater(self.signal_rms(), 0.1)
+        events = self.page.evaluate("key => JSON.parse(localStorage.getItem(key))", PLAYBACK_LOG_KEY)
+        self.assertTrue(any(event["event"] == "helper-play-refused" for event in events))
+
+    def test_media_pause_while_priming_cancels_start_before_creating_audio(self):
+        self.open_app(NATIVE_AUDIO_SESSION + """
+          HTMLMediaElement.prototype.play = function () {
             window.testMediaActions.pause();
             return Promise.resolve();
           };
         """)
-        self.play()
-        self.page.wait_for_timeout(400)
-        self.assertEqual(self.page.evaluate("window.testAudioSession.type"), "playback")
-        self.assertEqual(self.page.evaluate("window.testHelperStarts"), 0)
-        self.assertGreater(self.signal_rms(), 0.1)
+        if not self.page.evaluate("Boolean(window.AudioContext || window.webkitAudioContext)"):
+            self.skipTest("This Playwright browser build does not expose Web Audio")
+        self.page.locator("#playButton").click()
+        expect(self.page.locator("#status")).to_contain_text("Stopped")
+        expect(self.page.locator("#pauseButton")).to_be_disabled()
+        self.assertEqual(self.page.evaluate("window.testAudioContexts.length"), 0)
 
     def test_play_pause_reuses_the_audio_context(self):
         self.open_app()
@@ -482,7 +532,7 @@ class BrowserRegressions(unittest.TestCase):
         self.page.get_by_role("button", name="Copy playback report", exact=True).click()
         self.page.wait_for_function("Boolean(window.testCopiedReport)")
         report = self.page.evaluate("window.testCopiedReport")
-        self.assertIn("Sine Frequency Generator 2026-10-20.4", report)
+        self.assertIn("Sine Frequency Generator 2026-10-20.5", report)
         self.assertIn("media-session-pause", report)
         self.assertIn("iPhone/browser media Pause command", report)
         self.assertLessEqual(len(report), 3800)
@@ -527,7 +577,7 @@ class BrowserRegressions(unittest.TestCase):
         copy = self.page.get_by_role("button", name="Copy playback report", exact=True)
         copy.click()
         self.assertEqual(self.page.evaluate("window.testCopyCommand"), "copy")
-        self.assertIn("Sine Frequency Generator 2026-10-20.4", self.page.evaluate("window.testCopiedReport"))
+        self.assertIn("Sine Frequency Generator 2026-10-20.5", self.page.evaluate("window.testCopiedReport"))
         expect(self.page.locator("#playbackReportStatus")).to_contain_text("report copied")
         expect(copy).to_be_focused()
 
