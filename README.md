@@ -12,7 +12,7 @@ https://anthonytrance.github.io/sine-frequency-generator/
 - Default frequency of 1000 Hz when no saved frequency is available.
 - Frequency, mode, volume, pulse timings, and sweep settings are saved locally as they change. Reopening the app restores them with playback stopped.
 - Frequency slider for rough changes.
-- Separate Play, Pause, and Stop buttons. Play only starts playback, so repeated accessibility activations cannot toggle it back to stopped.
+- Separate Play and Stop buttons. Play only starts playback, so repeated accessibility activations cannot toggle it back to stopped. Stop and system Pause commands have the same effect, including restarting a sweep from its beginning on the next Play.
 - Continuous tone mode.
 - Pulse mode, defaulting to 230 ms on and 230 ms off.
 - Pulse edges use a short fade to reduce clicking.
@@ -23,8 +23,8 @@ https://anthonytrance.github.io/sine-frequency-generator/
 - Sweep up and sweep down modes with configurable start, end, length, and repeat.
 - Screen-reader-friendly labels, fieldsets, native controls, and live status.
 - Best-effort support for VoiceOver Magic Tap and media play/pause actions through the Media Session API. A silent media element connects system controls to the app's handlers, including on browsers with the Audio Session API. It starts in the activating gesture before Web Audio resumes, and pauses when playback stops. Its raw play/pause events never toggle the tone.
-- Temporary Web Audio interruptions retain the playback request and attempt to resume. Pause and Stop cancel pending starts and recovery.
-- An interruption reported by the Audio Session API or Web Audio is distinguished from a media pause command. The audio context is reused across Play/Pause unless it is closed or cannot resume.
+- Temporary Web Audio interruptions retain the playback request and attempt to resume. Stop and system Pause commands cancel pending starts and recovery.
+- An interruption reported by the Audio Session API or Web Audio is distinguished from a media pause command. The audio context is reused across Play/Stop unless it is closed or cannot resume.
 - Collapsed keyboard shortcut reference in the app.
 - Playback troubleshooting includes a local, bounded event report and the exact source of the last stop. Copy uses selection-based copying with a timed Clipboard API fallback, and leaves the report available for manual copying. Nothing is uploaded automatically.
 

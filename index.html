@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sine Frequency Generator</title>
-  <link rel="stylesheet" href="styles.css?v=20261020-5">
-  <script src="app.js?v=20261020-5" defer></script>
+  <link rel="stylesheet" href="styles.css?v=20261022-1">
+  <script src="app.js?v=20261022-1" defer></script>
 </head>
 <body>
   <header class="site-header">
@@ -17,7 +17,6 @@
       <h2 id="playback-heading">Playback</h2>
       <div class="button-row">
         <button id="playButton" class="primary" type="button">Play</button>
-        <button id="pauseButton" type="button" disabled>Pause</button>
         <button id="stopButton" type="button" disabled>Stop</button>
       </div>
 
@@ -133,7 +132,7 @@
       <details class="control-details">
         <summary id="shortcuts-heading">Keyboard shortcuts</summary>
         <ul class="shortcut-list">
-          <li><kbd>K</kbd> or <kbd>Space</kbd>: Play or pause</li>
+          <li><kbd>K</kbd> or <kbd>Space</kbd>: Play or stop</li>
           <li><kbd>S</kbd>: Stop</li>
           <li><kbd>1</kbd> or <kbd>C</kbd>: Continuous tone mode</li>
           <li><kbd>2</kbd> or <kbd>P</kbd>: Pulse mode</li>
@@ -150,7 +149,7 @@
     <section class="panel utility-panel" aria-labelledby="playback-troubleshooting-heading">
       <details class="control-details">
         <summary id="playback-troubleshooting-heading">Playback troubleshooting</summary>
-        <p id="appVersion">App version 2026-10-20.5</p>
+        <p id="appVersion">App version 2026-10-22.1</p>
         <p id="lastPlaybackStop">No playback stop recorded yet.</p>
         <p>The playback report stays on this device. After an unexpected stop, copy it and paste it into your message.</p>
         <button id="copyPlaybackReport" type="button">Copy playback report</button>

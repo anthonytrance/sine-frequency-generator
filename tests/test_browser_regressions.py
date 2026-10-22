@@ -100,7 +100,7 @@ class BrowserRegressions(unittest.TestCase):
         if not self.page.evaluate("Boolean(window.AudioContext || window.webkitAudioContext)"):
             self.skipTest("This Playwright browser build does not expose Web Audio")
         self.page.locator("#playButton").click()
-        expect(self.page.locator("#pauseButton")).to_be_enabled()
+        expect(self.page.locator("#stopButton")).to_be_enabled()
         if wait_for_audio:
             expect(self.page.locator("#status")).to_contain_text("Playing")
 
@@ -191,7 +191,7 @@ class BrowserRegressions(unittest.TestCase):
         self.page.wait_for_timeout(400)
         expect(play).to_have_text("Play")
         expect(play).to_be_focused()
-        expect(self.page.locator("#pauseButton")).to_be_enabled()
+        expect(self.page.locator("#stopButton")).to_be_enabled()
         expect(self.page.locator("#status")).to_contain_text("Playing")
         self.assertGreater(self.signal_rms(), 0.1)
         self.assertEqual(self.page.evaluate("window.testAudioContexts.length"), 1)
@@ -203,7 +203,7 @@ class BrowserRegressions(unittest.TestCase):
         self.play(wait_for_audio=False)
         self.page.wait_for_function("Boolean(window.testReleaseStart)")
         self.page.locator("#playButton").click()
-        expect(self.page.locator("#pauseButton")).to_be_enabled()
+        expect(self.page.locator("#stopButton")).to_be_enabled()
         self.page.evaluate("window.testReleaseStart()")
         expect(self.page.locator("#status")).to_contain_text("Playing")
         self.assertGreater(self.signal_rms(), 0.1)
@@ -215,7 +215,7 @@ class BrowserRegressions(unittest.TestCase):
         self.page.wait_for_timeout(3300)
         self.page.locator("#mediaControlAudio").evaluate("audio => audio.pause()")
         self.page.wait_for_timeout(400)
-        expect(self.page.locator("#pauseButton")).to_be_enabled()
+        expect(self.page.locator("#stopButton")).to_be_enabled()
         expect(self.page.locator("#status")).to_contain_text("Playing")
 
     def test_audio_interruption_recovers_instead_of_becoming_a_stop(self):
@@ -230,13 +230,13 @@ class BrowserRegressions(unittest.TestCase):
           await context.suspend();
         }""")
         self.page.wait_for_timeout(700)
-        expect(self.page.locator("#pauseButton")).to_be_enabled()
+        expect(self.page.locator("#stopButton")).to_be_enabled()
         self.page.evaluate("window.testEndInterruption()")
         self.page.wait_for_function("window.testAudioContexts.at(-1).state === 'running'")
         expect(self.page.locator("#status")).to_contain_text("Playing")
         self.assertGreater(self.signal_rms(), 0.1)
 
-    def test_explicit_pause_during_interruption_stays_stopped(self):
+    def test_stop_button_during_interruption_stays_stopped(self):
         self.open_app()
         self.play()
         self.page.evaluate("""async () => {
@@ -248,10 +248,10 @@ class BrowserRegressions(unittest.TestCase):
           await context.suspend();
         }""")
         self.page.wait_for_timeout(100)
-        self.page.locator("#pauseButton").click()
+        self.page.locator("#stopButton").click()
         self.page.evaluate("window.testEndInterruption?.()")
         self.page.wait_for_timeout(400)
-        expect(self.page.locator("#pauseButton")).to_be_disabled()
+        expect(self.page.locator("#stopButton")).to_be_disabled()
         expect(self.page.locator("#status")).to_contain_text("Stopped")
         self.assertLess(self.signal_rms(), 0.001)
 
@@ -262,18 +262,18 @@ class BrowserRegressions(unittest.TestCase):
         self.page.evaluate("window.testMediaActions.pause()")
         self.page.evaluate("window.testReleaseStart()")
         self.page.wait_for_timeout(400)
-        expect(self.page.locator("#pauseButton")).to_be_disabled()
+        expect(self.page.locator("#stopButton")).to_be_disabled()
         expect(self.page.locator("#status")).to_contain_text("Stopped")
 
     def test_explicit_media_play_pause_and_stop_still_work(self):
         self.open_app()
         self.play()
         self.page.evaluate("window.testMediaActions.pause()")
-        expect(self.page.locator("#pauseButton")).to_be_disabled()
+        expect(self.page.locator("#stopButton")).to_be_disabled()
         self.page.evaluate("window.testMediaActions.play()")
         expect(self.page.locator("#status")).to_contain_text("Playing")
         self.page.evaluate("window.testMediaActions.stop()")
-        expect(self.page.locator("#pauseButton")).to_be_disabled()
+        expect(self.page.locator("#stopButton")).to_be_disabled()
         expect(self.page.locator("#status")).to_contain_text("Stopped")
 
     def test_keyboard_toggle_still_works_outside_the_buttons(self):
@@ -286,16 +286,15 @@ class BrowserRegressions(unittest.TestCase):
         expect(self.page.locator("#status")).to_contain_text("Playing")
         self.assertGreater(self.signal_rms(), 0.1)
 
-    def test_pause_button_cancels_an_unfinished_start(self):
+    def test_stop_button_cancels_an_unfinished_start(self):
         self.open_app("window.testDelayStart = true;")
         self.play(wait_for_audio=False)
         self.page.wait_for_function("Boolean(window.testReleaseStart)")
-        expect(self.page.locator("#pauseButton")).to_be_enabled()
         expect(self.page.locator("#stopButton")).to_be_enabled()
-        self.page.locator("#pauseButton").click()
+        self.page.locator("#stopButton").click()
         self.page.evaluate("window.testReleaseStart()")
         self.page.wait_for_timeout(200)
-        expect(self.page.locator("#pauseButton")).to_be_disabled()
+        expect(self.page.locator("#stopButton")).to_be_disabled()
         expect(self.page.locator("#status")).to_contain_text("Stopped")
 
     def test_cancelled_start_cannot_disrupt_a_new_play_request(self):
@@ -324,17 +323,18 @@ class BrowserRegressions(unittest.TestCase):
         for mode in ("pulse", "sweep-up", "sweep-down", "continuous"):
             self.page.locator(f"input[name=mode][value='{mode}']").check()
             self.page.wait_for_timeout(200)
-            expect(self.page.locator("#pauseButton")).to_be_enabled()
+            expect(self.page.locator("#stopButton")).to_be_enabled()
         self.page.locator("#stopButton").click()
-        expect(self.page.locator("#pauseButton")).to_be_disabled()
+        expect(self.page.locator("#stopButton")).to_be_disabled()
 
     def test_fresh_settings_default_to_1000_hz(self):
         self.open_app()
+        expect(self.page.locator(".button-row button")).to_have_text(["Play", "Stop"])
         expect(self.page.locator("#frequencyInput")).to_have_value("1000")
         expect(self.page.locator("#frequencySlider")).to_have_attribute("aria-valuetext", "1000 Hz")
         expect(self.page.locator("#status")).to_contain_text("1000 Hz")
         expect(self.page.locator("#playButton")).to_have_text("Play")
-        expect(self.page.locator("#pauseButton")).to_be_disabled()
+        expect(self.page.locator("#stopButton")).to_be_disabled()
 
     def test_frequency_mode_and_pulse_settings_survive_closing_the_app(self):
         self.open_app()
@@ -380,7 +380,7 @@ class BrowserRegressions(unittest.TestCase):
         expect(self.page.locator("#frequencyInput")).to_have_value("1234")
         expect(self.page.locator("#status")).to_contain_text("Stopped")
         expect(self.page.locator("#playButton")).to_have_text("Play")
-        expect(self.page.locator("#pauseButton")).to_be_disabled()
+        expect(self.page.locator("#stopButton")).to_be_disabled()
         self.assertEqual(self.page.evaluate("window.testAudioContexts.length"), 0)
         expect(self.page.locator("#stopButton")).to_be_disabled()
 
@@ -445,7 +445,7 @@ class BrowserRegressions(unittest.TestCase):
         self.page.wait_for_timeout(300)
         expect(self.page.locator("#status")).to_contain_text("Stopped")
         self.assertTrue(self.page.locator("#mediaControlAudio").evaluate("audio => audio.paused"))
-        expect(self.page.locator("#pauseButton")).to_be_disabled()
+        expect(self.page.locator("#stopButton")).to_be_disabled()
 
     def test_refused_media_control_audio_does_not_break_the_tone(self):
         self.open_app(NATIVE_AUDIO_SESSION + """
@@ -469,16 +469,16 @@ class BrowserRegressions(unittest.TestCase):
             self.skipTest("This Playwright browser build does not expose Web Audio")
         self.page.locator("#playButton").click()
         expect(self.page.locator("#status")).to_contain_text("Stopped")
-        expect(self.page.locator("#pauseButton")).to_be_disabled()
+        expect(self.page.locator("#stopButton")).to_be_disabled()
         self.assertEqual(self.page.evaluate("window.testAudioContexts.length"), 0)
 
-    def test_play_pause_reuses_the_audio_context(self):
+    def test_play_stop_reuses_the_audio_context(self):
         self.open_app()
         for _ in range(3):
             self.play()
             self.assertGreater(self.signal_rms(), 0.1)
-            self.page.locator("#pauseButton").click()
-            expect(self.page.locator("#pauseButton")).to_be_disabled()
+            self.page.locator("#stopButton").click()
+            expect(self.page.locator("#stopButton")).to_be_disabled()
             expect(self.page.locator("#status")).to_contain_text("Stopped")
         self.assertEqual(self.page.evaluate("window.testAudioContexts.length"), 1)
 
@@ -491,7 +491,7 @@ class BrowserRegressions(unittest.TestCase):
           await window.testAudioContexts.at(-1).suspend();
           window.testMediaActions.pause();
         }""")
-        expect(self.page.locator("#pauseButton")).to_be_enabled()
+        expect(self.page.locator("#stopButton")).to_be_enabled()
         expect(self.page.locator("#status")).to_contain_text("interrupted")
         self.page.evaluate("""() => {
           window.testAudioSession.state = 'active';
@@ -514,7 +514,7 @@ class BrowserRegressions(unittest.TestCase):
           window.testAudioSession.state = 'active';
           window.testAudioSession.dispatchEvent(new Event('statechange'));
         }""")
-        expect(self.page.locator("#pauseButton")).to_be_disabled()
+        expect(self.page.locator("#stopButton")).to_be_disabled()
         expect(self.page.locator("#status")).to_contain_text("Stopped")
         self.assertLess(self.signal_rms(), 0.001)
 
@@ -532,7 +532,7 @@ class BrowserRegressions(unittest.TestCase):
         self.page.get_by_role("button", name="Copy playback report", exact=True).click()
         self.page.wait_for_function("Boolean(window.testCopiedReport)")
         report = self.page.evaluate("window.testCopiedReport")
-        self.assertIn("Sine Frequency Generator 2026-10-20.5", report)
+        self.assertIn("Sine Frequency Generator 2026-10-22.1", report)
         self.assertIn("media-session-pause", report)
         self.assertIn("iPhone/browser media Pause command", report)
         self.assertLessEqual(len(report), 3800)
@@ -577,7 +577,7 @@ class BrowserRegressions(unittest.TestCase):
         copy = self.page.get_by_role("button", name="Copy playback report", exact=True)
         copy.click()
         self.assertEqual(self.page.evaluate("window.testCopyCommand"), "copy")
-        self.assertIn("Sine Frequency Generator 2026-10-20.5", self.page.evaluate("window.testCopiedReport"))
+        self.assertIn("Sine Frequency Generator 2026-10-22.1", self.page.evaluate("window.testCopiedReport"))
         expect(self.page.locator("#playbackReportStatus")).to_contain_text("report copied")
         expect(copy).to_be_focused()
 
@@ -623,24 +623,29 @@ class BrowserRegressions(unittest.TestCase):
             self.skipTest("This Playwright browser build does not expose Web Audio")
         self.page.locator("#playButton").click()
         expect(self.page.locator("#playButton")).to_have_text("Play")
-        expect(self.page.locator("#pauseButton")).to_be_disabled()
+        expect(self.page.locator("#stopButton")).to_be_disabled()
         expect(self.page.locator("#liveStatus")).to_have_text("Stopped")
         events = self.page.evaluate("key => JSON.parse(localStorage.getItem(key))", PLAYBACK_LOG_KEY)
         last_stop = max(index for index, event in enumerate(events) if event["event"] == "stop")
         self.assertFalse(any(event["event"] in ("playing", "helper-play-request") for event in events[last_stop + 1:]))
         self.assertIn("media Pause command", events[last_stop]["source"])
 
-    def test_cached_markup_without_new_controls_does_not_break_playback(self):
+    def test_cached_markup_with_old_pause_button_does_not_break_playback(self):
         self.open_app("""
           document.addEventListener('DOMContentLoaded', () => {
             document.querySelector('[aria-labelledby=playback-troubleshooting-heading]')?.remove();
-            document.getElementById('pauseButton')?.remove();
+            const oldPause = document.createElement('button');
+            oldPause.id = 'pauseButton';
+            oldPause.type = 'button';
+            oldPause.textContent = 'Pause';
+            document.getElementById('stopButton').before(oldPause);
           });
         """)
         expect(self.page.locator("#frequencyInput")).to_have_value("1000")
+        expect(self.page.locator(".button-row button")).to_have_text(["Play", "Stop"])
         self.play()
         self.assertGreater(self.signal_rms(), 0.1)
-        self.page.locator("#pauseButton").click()
+        self.page.locator("#stopButton").click()
         expect(self.page.locator("#status")).to_contain_text("Stopped")
 
 

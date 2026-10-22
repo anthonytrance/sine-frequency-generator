@@ -12,7 +12,7 @@
   const LIVE_THROTTLE_MS = 3500;
   const SETTINGS_STORAGE_KEY = "sine-frequency-generator.settings.v1";
   const PLAYBACK_LOG_STORAGE_KEY = "sine-frequency-generator.playback-log.v1";
-  const APP_VERSION = "2026-10-20.5";
+  const APP_VERSION = "2026-10-22.1";
   const MAX_PLAYBACK_EVENTS = 40;
   const MAJOR_SCALE_STEPS = [2, 2, 1, 2, 2, 2, 1];
 
@@ -73,15 +73,8 @@
   function bindElements() {
     els.playButton = document.getElementById("playButton");
     els.stopButton = document.getElementById("stopButton");
-    els.pauseButton = document.getElementById("pauseButton");
-    if (!els.pauseButton) {
-      // A cached HTML page may load the new script before the new markup.
-      els.pauseButton = document.createElement("button");
-      els.pauseButton.id = "pauseButton";
-      els.pauseButton.type = "button";
-      els.pauseButton.textContent = "Pause";
-      els.stopButton.before(els.pauseButton);
-    }
+    // Older cached markup may still include the redundant Pause button.
+    document.getElementById("pauseButton")?.remove();
     els.status = document.getElementById("status");
     els.mediaControlAudio = document.getElementById("mediaControlAudio");
     els.appVersion = document.getElementById("appVersion");
@@ -295,7 +288,6 @@
       tracePlayback("button-activation", { source: "Play button", clicks: event.detail, trusted: event.isTrusted, pointer: event.pointerType || "none" });
       startPlayback("Play button");
     });
-    els.pauseButton.addEventListener("click", () => stopPlayback({ source: "Pause button" }));
     els.stopButton.addEventListener("click", () => stopPlayback({ source: "Stop button" }));
     els.copyPlaybackReport?.addEventListener("click", copyPlaybackReport);
     document.addEventListener("keydown", handleGlobalKeys, true);
@@ -687,7 +679,7 @@
     } catch {
       tracePlayback("recovery-failed");
       if (requestId === playbackRequestId && context === audioContext && state.isPlaying) {
-        showError("Audio could not resume. Press Pause, then Play to restart.");
+        showError("Audio could not resume. Press Stop, then Play to restart.");
       }
     } finally {
       if (resumeAttemptContext === context) {
@@ -1037,7 +1029,6 @@
   function updatePlaybackButtons() {
     els.playButton.disabled = false;
     els.playButton.textContent = "Play";
-    els.pauseButton.disabled = !state.isPlaying && !startInProgress;
     els.stopButton.disabled = !state.isPlaying && !startInProgress;
     updateMediaSessionState();
   }
